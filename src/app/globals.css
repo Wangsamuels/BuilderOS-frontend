@@ -1,0 +1,104 @@
+@import "tailwindcss";
+@import "@fontsource-variable/sora";
+@import "@fontsource-variable/albert-sans";
+
+/*
+ * BuilderOS design tokens. The palette is taken from an accretion disk: warm light on a violet-black field,
+ * with the Doppler pair (blue approaching, red receding) reserved for information and danger.
+ */
+@theme {
+  --color-void: #050509;
+  --color-bg: #08080f;
+  --color-surface: #0f0f18;
+  --color-raised: #171724;
+  --color-hover: #1e1e2e;
+  --color-line: #ffffff14;
+  --color-line-strong: #ffffff29;
+  --color-ink: #f3ebdd;
+  --color-ink-2: #b9b1a5;
+  --color-ink-3: #8a847c;
+  --color-ember: #ffb35a;
+  --color-ember-deep: #e8892c;
+  --color-ember-wash: #ffb35a1f;
+  --color-blue: #7db8ff;
+  --color-blue-wash: #7db8ff1f;
+  --color-red: #ff6b57;
+  --color-red-wash: #ff6b571f;
+  --color-green: #4cc38a;
+  --color-green-wash: #4cc38a1f;
+  --color-amber: #f5b642;
+  --color-amber-wash: #f5b6421f;
+
+  /* categorical series (teams), fixed order, validated for the dark surface */
+  --color-s1: #3987e5;
+  --color-s2: #d95926;
+  --color-s3: #199e70;
+  --color-s4: #c98500;
+  --color-s5: #d55181;
+  --color-s6: #008300;
+  --color-s7: #9085e9;
+  --color-s8: #e66767;
+
+  --font-sans: "Albert Sans Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Sora Variable", "Albert Sans Variable", ui-sans-serif, sans-serif;
+
+  --radius-control: 10px;
+  --radius-panel: 16px;
+
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+html {
+  background: var(--color-bg);
+  color: var(--color-ink);
+  color-scheme: dark;
+  -webkit-text-size-adjust: 100%;
+}
+body {
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.5;
+  min-height: 100dvh;
+  -webkit-font-smoothing: antialiased;
+}
+h1, h2, h3, .font-display { font-family: var(--font-display); letter-spacing: -0.015em; }
+.num { font-family: var(--font-display); font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+::selection { background: #ffb35a55; }
+
+:focus-visible { outline: 2px solid var(--color-blue); outline-offset: 2px; border-radius: 6px; }
+button, a, input, select, textarea { -webkit-tap-highlight-color: transparent; }
+button:not(:disabled), [role="button"], summary, select, label[for] { cursor: pointer; }
+
+/* A panel is lit from above, like the rim of light that bends over the horizon. */
+.panel {
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-panel);
+  box-shadow: inset 0 1px 0 #ffffff0a;
+}
+.hairline { border-color: var(--color-line); }
+
+.skeleton {
+  border-radius: 8px;
+  background: linear-gradient(90deg, #ffffff0a 0%, #ffffff17 40%, #ffffff0a 80%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+@keyframes shimmer { to { background-position: -200% 0; } }
+@keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes orbit { to { transform: rotate(360deg); } }
+@keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+.animate-rise { animation: rise 0.5s var(--ease-out) both; }
+
+dialog::backdrop { background: #020206cc; backdrop-filter: blur(6px); }
+dialog[open] { animation: rise 0.28s var(--ease-out) both; }
+
+/* thin scrollbars that match the field */
+* { scrollbar-width: thin; scrollbar-color: #ffffff22 transparent; }
+
+/* NEAR wallet picker: match the app surface */
+#near-wallet-selector-modal { --wallet-selector-backdrop-bg: #020206cc; --wallet-selector-content-bg: #0f0f18; --wallet-selector-sidebar-border-color: #ffffff14; --wallet-selector-selected-wallet-bg: #171724; --wallet-selector-heading-color: #f3ebdd; --wallet-selector-text-color: #b9b1a5; --wallet-selector-primary: #ffb35a; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+}
