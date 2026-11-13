@@ -48,7 +48,7 @@ function Bridge() {
   const pending = useRef<{ resolve: () => void; reject: (e: Error) => void } | null>(null);
   const { login } = useLogin({
     onComplete: () => pending.current?.resolve(),
-    onError: (e) => pending.current?.reject(new WalletRejected(String(e) === "exited_auth_flow" ? "Sign-in was closed." : `Sign-in didn't finish (${String(e)}).`)),
+    onError: (e) => pending.current?.reject(new WalletRejected(String(e) === "exited_auth_flow" ? "The Privy window was closed." : `Sign-in didn't finish (${String(e)}).`)),
   });
   const latest = useRef({ ready, authenticated, user, login, logout, createWallet, signRawHash });
   latest.current = { ready, authenticated, user, login, logout, createWallet, signRawHash };
@@ -93,6 +93,31 @@ function Bridge() {
         return ensureWallet();
       },
       identityToken: () => getIdentityToken(),
+      async confirmEmail() {
+        const settle = async (want: boolean) => {
+          for (let i = 0; i < 60 && latest.current.authenticated !== want; i++) await new Promise((r) => setTimeout(r, 50));
+        };
+        // Start from a clean slate so the token is issued now, for the address confirmed now.
+        if (latest.current.authenticated) {
+          await latest.current.logout();
+          await settle(false);
+        }
+        await new Promise<void>((resolve, reject) => {
+          pending.current = { resolve, reject };
+          latest.current.login({ loginMethods: ["email"] });
+        });
+        pending.current = null;
+        await settle(true);
+        let token: string | null = null;
+        for (let i = 0; i < 20 && !token; i++) {
+          token = await getIdentityToken().catch(() => null);
+          if (!token) await new Promise((r) => setTimeout(r, 150));
+        }
+        // The Privy session existed only to prove the address; the person stays signed in with their NEAR wallet.
+        await latest.current.logout().catch(() => undefined);
+        if (!token) throw new Error("Privy confirmed the address but returned no identity token. Identity tokens need to be switched on for this app in Privy.");
+        return token;
+      },
     };
     privyStore.set(controller);
   }, [ready, authenticated]);

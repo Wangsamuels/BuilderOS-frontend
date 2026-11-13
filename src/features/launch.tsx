@@ -14,14 +14,95 @@ import { Async, Button, Empty, Field, Icon, Input, LinkButton, Notice, PageHeade
 import { IS_TESTNET, TESTNET_FAUCET_URL } from "@/lib/config";
 import { cx, slugify } from "@/lib/format";
 import { near, parseUsd, toBig, usd, usdInput } from "@/lib/money";
+import { confirmEmailWithPrivy, currentIdentityToken, privyCanConfirmEmail } from "@/wallet/privy-store";
+import { WalletRejected } from "@/wallet/signer";
 import { pollUntil, SignCancelled, useSign } from "@/wallet/signing";
 
 type StepId = "company" | "teams" | "email" | "funding" | "sign" | "creating";
 const LABEL: Record<StepId, string> = { company: "Company", teams: "Teams", email: "Email", funding: "Funding", sign: "Sign", creating: "Creating" };
 type TeamRow = { team: string; monthly: string; perTx: string };
 
+/**
+ * People who signed in with Google or email already proved their address to Privy, so they shouldn't type a code.
+ * Sign-in normally settles this; if it didn't (the server couldn't check the token then), this settles it here
+ * on its own, and falls back to the code only if it can't.
+ */
+function PrivyEmail({ onVerified }: { onVerified: () => void }) {
+  const qc = useQueryClient();
+  const tried = useRef(false);
+  const [missing, setMissing] = useState(false);
+  const confirm = useMutation({
+    mutationFn: async () => {
+      const token = await currentIdentityToken();
+      if (!token) {
+        setMissing(true);
+        throw new Error("Your sign-in didn't include an email we can confirm.");
+      }
+      setMissing(false);
+      return endpoints.verifyEmailWithPrivy(token);
+    },
+    onSuccess: async () => {
+      await Promise.all([qc.invalidateQueries({ queryKey: ["me"] }), qc.invalidateQueries({ queryKey: ["account"] })]);
+      onVerified();
+    },
+  });
+  useEffect(() => {
+    if (tried.current) return;
+    tried.current = true;
+    confirm.mutate();
+  }, [confirm]);
+  if (confirm.isSuccess) return null;
+  if (!confirm.error)
+    return (
+      <p className="flex items-center gap-2.5 text-sm text-ink-2" role="status" data-testid="privy-email-checking">
+        <span className="size-4 animate-spin rounded-full border-2 border-line-strong border-t-ember" /> Confirming the email you signed in with…
+      </p>
+    );
+  return (
+    <div className="space-y-3" data-testid="privy-email-failed">
+      <Notice tone="amber">
+        {missing ? "We couldn't read an email from your sign-in." : `We couldn't confirm your sign-in email. ${(confirm.error as Error).message}`} Try again, or confirm an address with a code below.
+      </Notice>
+      <Button size="sm" icon="refresh" loading={confirm.isPending} onClick={() => confirm.mutate()} data-testid="privy-email-retry">
+        Use my sign-in email
+      </Button>
+    </div>
+  );
+}
+
+/**
+ * NEAR wallet sign-ins: confirm an email through Privy. Privy asks for the address, sends its own one-time
+ * code and checks it; the server then accepts Privy's signed result. No email leaves our own backend.
+ */
+function WalletEmail({ onVerified }: { onVerified: () => void }) {
+  const qc = useQueryClient();
+  const confirm = useMutation({
+    mutationFn: async () => endpoints.verifyEmailWithPrivy(await confirmEmailWithPrivy()),
+    onSuccess: async () => {
+      await Promise.all([qc.invalidateQueries({ queryKey: ["me"] }), qc.invalidateQueries({ queryKey: ["account"] })]);
+      onVerified();
+    },
+  });
+  const closed = confirm.error instanceof WalletRejected;
+  return (
+    <div className="space-y-4" data-testid="wallet-email">
+      <p className="max-w-[58ch] text-sm text-ink-2">Approvals and alerts for your company go to this address. You'll enter it in a small window and confirm it with a one-time code.</p>
+      {confirm.error ? <Notice tone={closed ? "amber" : "red"}>{closed ? "The confirmation window was closed before it finished. Nothing was saved." : (confirm.error as Error).message}</Notice> : null}
+      <Button variant="primary" icon="inbox" loading={confirm.isPending} onClick={() => confirm.mutate()} data-testid="verify-email-privy">
+        Verify my email
+      </Button>
+    </div>
+  );
+}
+
 export function EmailVerify({ onVerified }: { onVerified: () => void }) {
   const qc = useQueryClient();
+  const { me } = useSession();
+  const viaPrivy = me.data?.loginMethod === "privy" && me.data.needsEmailForCompany;
+  const [privyDone, setPrivyDone] = useState(false);
+  // wallet sign-ins confirm through Privy when the app has it; the code from our own server stays as a fallback
+  const viaWallet = me.data?.loginMethod !== "privy" && privyCanConfirmEmail;
+  const [ownCode, setOwnCode] = useState(false);
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
   const start = useMutation({ mutationFn: () => endpoints.startEmail(email.trim()) });
@@ -35,7 +116,13 @@ export function EmailVerify({ onVerified }: { onVerified: () => void }) {
   const sent = start.data;
   return (
     <div className="space-y-5">
-      {!sent ? (
+      {viaPrivy && !privyDone ? <PrivyEmail onVerified={() => (setPrivyDone(true), onVerified())} /> : null}
+      {viaWallet ? <WalletEmail onVerified={onVerified} /> : null}
+      {viaWallet && !ownCode ? (
+        <button type="button" onClick={() => setOwnCode(true)} className="text-[13px] text-ink-3 underline decoration-line-strong underline-offset-4 hover:text-ink" data-testid="use-own-code">
+          Get a code from BuilderOS instead
+        </button>
+      ) : !sent ? (
         <form className="space-y-4" onSubmit={(e) => (e.preventDefault(), start.mutate())}>
           <Field label="Email" hint="Approvals and alerts for your company go here. We send a 6-digit code to confirm it." error={start.error ? (start.error as Error).message : null}>
             {(p) => <Input {...p} type="email" name="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" />}

@@ -22,6 +22,7 @@ export const seed = {
   grant: (slug: string, accountId: string, g: { scopes?: string[]; admin?: boolean; team?: string }) => api("/__test/grant", { slug, accountId, ...g }),
   revoke: (slug: string, accountId: string) => api("/__test/revoke", { slug, accountId }),
   balance: (accountId: string, near: number) => api("/__test/balance", { accountId, near }),
+  privyEmailOff: (accountId: string) => api("/__test/privy-email-off", { accountId }),
   email: (accountId: string, email: string) => api("/__test/email", { accountId, email }),
   approval: (slug: string, opts: { title?: string; amount?: number; team?: string; kind?: string } = {}) => api<{ id: string }>("/__test/approval", { slug, ...opts }),
   report: (slug: string, opts: { title?: string; team?: string; outcome?: string } = {}) => api<{ id: string }>("/__test/report", { slug, ...opts }),

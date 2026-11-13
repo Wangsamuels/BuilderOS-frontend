@@ -123,16 +123,13 @@ test.describe("from idea to company", () => {
     await expect(wizard).toHaveAttribute("data-step", "teams");
     await page.getByRole("button", { name: "Continue" }).click();
 
-    // a wallet sign-up adds an email only now, when creating a company
+    // a wallet sign-up adds an email only now, when creating a company, and confirms it through Privy
     await expect(wizard).toHaveAttribute("data-step", "email");
-    await page.getByLabel("Email").fill("founder@example.com");
-    await page.getByRole("button", { name: "Send code" }).click();
-    const code = page.getByLabel("6-digit code");
-    await code.fill("000000");
-    await page.getByRole("button", { name: "Verify email" }).click();
-    await expect(page.getByText(/doesn't match/)).toBeVisible();
-    await code.fill((await code.getAttribute("data-dev-code"))!);
-    await page.getByRole("button", { name: "Verify email" }).click();
+    await page.getByTestId("verify-email-privy").click(); // the person closes Privy's window
+    await expect(page.getByTestId("wallet-email")).toContainText("closed before it finished");
+    await expect(wizard).toHaveAttribute("data-step", "email");
+    await page.evaluate(() => ((window as any).__testWallet = { ...(window as any).__testWallet, privyEmail: "founder@example.com" }));
+    await page.getByTestId("verify-email-privy").click(); // this time they confirm the address
 
     await expect(wizard).toHaveAttribute("data-step", "funding");
     await expect(page.getByRole("button", { name: "Continue" })).toBeDisabled();
@@ -157,6 +154,50 @@ test.describe("from idea to company", () => {
     expect(company.tasks).toBe(5);
     await page.goto(`/c/lumen-e2e/work`);
     await expect(page.getByTestId("task-row")).toHaveCount(5);
+  });
+
+  test("a Google sign-in whose email wasn't confirmed at sign-in is confirmed in the wizard without a code", async ({ page }) => {
+    await seed.privyEmailOff(me.accountId); // e.g. the server couldn't check the Privy token at sign-in
+    await seed.balance(me.accountId, 40);
+    await signIn(page);
+    await describe(page);
+    await page.getByTestId("launch").click();
+    await page.getByRole("button", { name: "Continue" }).click();
+    await page.getByRole("button", { name: "Continue" }).click();
+    const wizard = page.getByTestId("launch-wizard");
+    // no token available: says so, and still offers the code
+    await expect(wizard).toHaveAttribute("data-step", "email");
+    await expect(page.getByTestId("privy-email-failed")).toContainText("couldn't read an email from your sign-in");
+    await expect(page.getByRole("button", { name: "Send code" })).toBeVisible();
+    // a token the server rejects: its reason is shown
+    await page.evaluate(() => ((window as any).__testWallet = { identityToken: "expired" }));
+    await page.getByTestId("privy-email-retry").click();
+    await expect(page.getByTestId("privy-email-failed")).toContainText("invalid or expired");
+    // a good token: verified with one click, no code typed
+    await page.evaluate(() => ((window as any).__testWallet = { identityToken: "test-identity:wang@example.com" }));
+    await page.getByTestId("privy-email-retry").click();
+    await expect(wizard).toHaveAttribute("data-step", "funding");
+  });
+
+  test("a wallet sign-up can still confirm with a code from BuilderOS", async ({ page }) => {
+    await seed.balance(me.accountId, 40);
+    await signIn(page, "wallet");
+    await describe(page);
+    await page.getByTestId("launch").click();
+    await page.getByRole("button", { name: "Continue" }).click();
+    await page.getByRole("button", { name: "Continue" }).click();
+    const wizard = page.getByTestId("launch-wizard");
+    await expect(wizard).toHaveAttribute("data-step", "email");
+    await page.getByTestId("use-own-code").click();
+    await page.getByLabel("Email").fill("founder@example.com");
+    await page.getByRole("button", { name: "Send code" }).click();
+    const code = page.getByLabel("6-digit code");
+    await code.fill("000000");
+    await page.getByRole("button", { name: "Verify email" }).click();
+    await expect(page.getByText(/doesn't match/)).toBeVisible();
+    await code.fill((await code.getAttribute("data-dev-code"))!);
+    await page.getByRole("button", { name: "Verify email" }).click();
+    await expect(wizard).toHaveAttribute("data-step", "funding");
   });
 
   test("launch can be left half-signed and resumed", async ({ page }) => {

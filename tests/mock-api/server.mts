@@ -44,6 +44,7 @@ let events: Json[] = [];
 let streamTokens = new Map<string, string>();
 let streams: Array<{ res: ServerResponse; accountId: string; lastEventId: number }> = [];
 let streamLog: Array<{ accountId: string; lastEventId: number }> = [];
+let privyEmailOff = new Set<string>();
 let seq = 0;
 const nid = (p: string) => `${p}_${(++seq).toString(36)}${randomBytes(3).toString("hex")}`;
 
@@ -509,7 +510,7 @@ pub("POST", "/v1/auth/verify", ({ body }) => {
   if (Buffer.from(pk).toString("hex") !== body.accountId) throw new Http(401, "unauthenticated", "The key doesn't belong to this account.");
   const a = account(body.accountId, body.loginMethod);
   a.loginMethod = body.loginMethod ?? a.loginMethod;
-  if (a.loginMethod === "privy" && !a.email.verified) a.email = { address: `${a.id.slice(0, 6)}@privy.test`, verified: true, source: "privy", pending: null };
+  if (a.loginMethod === "privy" && !a.email.verified && !privyEmailOff.has(a.id)) a.email = { address: `${a.id.slice(0, 6)}@privy.test`, verified: true, source: "privy", pending: null };
   const token = randomBytes(24).toString("hex");
   sessions.set(token, { accountId: a.id, expiresAt: now() + DAY });
   return { accountId: a.id, token, expiresAt: iso(now() + DAY), loginMethod: a.loginMethod, email: { ...a.email, address: mask(a.email.address) } };
@@ -535,6 +536,13 @@ on("POST", "/v1/account/email/verify", ({ me, body }) => {
   if (body.code !== me.code.value) { me.code.tries++; throw new Http(400, "wrong_code", `That code doesn't match. ${5 - me.code.tries} tries left.`); }
   me.email = { address: me.email.pending, verified: true, source: "code", pending: null };
   me.code = undefined;
+  return { ok: true, email: { ...me.email, address: mask(me.email.address) } };
+});
+// Verify the email from a Privy identity token (the fallback when sign-in couldn't do it)
+on("POST", "/v1/account/email/privy", ({ me, body }) => {
+  const m = /^test-identity:(.+@.+)$/.exec(String(body.identityToken ?? ""));
+  if (!m) throw new Http(401, "bad_privy_token", "The sign-in token is invalid or expired.");
+  me.email = { address: m[1], verified: true, source: "privy", pending: null };
   return { ok: true, email: { ...me.email, address: mask(me.email.address) } };
 });
 on("GET", "/v1/account/preferences", ({ me }) => ({ preferences: me.prefs }));
@@ -861,6 +869,7 @@ pub("POST", "/__test/company", ({ body }) => { account(body.founder); const c = 
 pub("POST", "/__test/grant", ({ body }) => { const c = company(body.slug); account(body.accountId); c.members.set(body.accountId, { scopes: body.scopes ?? [], admin: Boolean(body.admin), departmentId: body.team ? dept(body.team, c.slug) : null }); emit("grant_set", c, { account: body.accountId }); return { ok: true }; });
 pub("POST", "/__test/revoke", ({ body }) => { const c = company(body.slug); c.members.delete(body.accountId); return { ok: true }; });
 pub("POST", "/__test/balance", ({ body }) => { account(body.accountId).balance = BigInt(Math.round(body.near * 100)) * (NEAR / 100n); return { ok: true }; });
+pub("POST", "/__test/privy-email-off", ({ body }) => { privyEmailOff.add(body.accountId); return { ok: true }; });
 pub("POST", "/__test/email", ({ body }) => { account(body.accountId).email = { address: body.email, verified: true, source: "code", pending: null }; return { ok: true }; });
 pub("POST", "/__test/approval", ({ body }) => {
   const c = company(body.slug);
@@ -888,7 +897,7 @@ function reset() {
   companies = new Map(); accounts = new Map(); sessions = new Map(); challenges = new Map(); drafts = new Map(); invites = []; outbox = []; txLog = new Map(); idem = new Map(); events = []; streamTokens = new Map(); streamLog = []; idempotentReplays = 0;
   for (const s of streams) s.res.end();
   streams = [];
-  pendingCreates.clear(); pendingKeys.clear();
+  pendingCreates.clear(); pendingKeys.clear(); privyEmailOff = new Set();
 }
 
 const CORS = { "access-control-allow-methods": "GET,POST,PATCH,DELETE,OPTIONS", "access-control-allow-headers": "content-type, authorization, idempotency-key, last-event-id, x-request-id", "access-control-expose-headers": "idempotent-replay", "access-control-max-age": "600" };

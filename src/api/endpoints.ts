@@ -18,6 +18,8 @@ export const endpoints = {
   // account
   account: () => get<T.Account>("/v1/account"),
   startEmail: (email: string) => write<{ ok: boolean; sentTo: string; expiresAt: string; devCode?: string }>("POST", "/v1/account/email", { email }),
+  /** Verify the email with the Privy identity token instead of a code (Google and email sign-ins). */
+  verifyEmailWithPrivy: (identityToken: string) => write<{ ok: boolean; email: T.EmailStatus }>("POST", "/v1/account/email/privy", { identityToken }),
   verifyEmail: (code: string) => write<{ ok: boolean; email: T.EmailStatus }>("POST", "/v1/account/email/verify", { code }),
   setPreferences: (body: { lastCompanyId?: string | null; dismissed?: string[] }) => write<{ preferences: T.Account["preferences"] }>("PATCH", "/v1/account/preferences", body),
 
