@@ -15,7 +15,7 @@ import { cx } from "@/lib/format";
 const FRAG = `
 precision highp float;
 uniform vec2 uRes; uniform float uTime; uniform float uTilt; uniform float uMass; uniform float uCool;
-uniform vec2 uOffset; uniform float uZoom; uniform float uSteps;
+uniform vec2 uOffset; uniform float uZoom; uniform float uSteps; uniform float uYaw; uniform float uHeat;
 
 float hash(vec2 p){ p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
 // value noise, periodic along x so the disk has no seam
@@ -48,7 +48,8 @@ void main(){
   uv = (uv - uOffset) / uZoom;
   // camera orbiting above the disk plane (y = 0); the horizon has radius 1
   float dist = 13.0;
-  vec3 ro = vec3(0.0, sin(uTilt) * dist, -cos(uTilt) * dist);
+  // the camera orbits a little with the cursor: stars, lensing and the disk all shift as one scene, not as layers
+  vec3 ro = vec3(sin(uYaw) * cos(uTilt), sin(uTilt), -cos(uYaw) * cos(uTilt)) * dist;
   vec3 fw = normalize(-ro), rt = normalize(cross(vec3(0.0, 1.0, 0.0), fw)), up = cross(fw, rt);
   // a slight roll so the disk sits on a diagonal, like a photograph rather than a diagram
   float roll = -0.14; uv = mat2(cos(roll), -sin(roll), sin(roll), cos(roll)) * uv;
@@ -85,6 +86,8 @@ void main(){
         c *= pow(max(1.0 + dop, 0.05), 3.0);
         c = mix(c, c * vec3(0.72, 0.9, 1.35), clamp(dop, 0.0, 1.0) * 0.6);
         c *= 1.6 * (0.6 + tmp * 1.6);
+        // matter near a visitor heats up: the inner disk flares as the cursor nears the horizon
+        c *= 1.0 + uHeat * (0.25 + 0.9 * tmp * tmp);
         float aa = clamp(dens * 0.9, 0.0, 1.0);
         col += (1.0 - alpha) * aa * c; alpha += (1.0 - alpha) * aa;
       }
@@ -93,7 +96,7 @@ void main(){
     if (alpha > 0.985) break;
   }
   if (!captured) {
-    vec3 bg = stars(v) * 0.9;
+    vec3 bg = stars(v) * (0.9 + 0.5 * uHeat);
     bg += vec3(0.10, 0.05, 0.16) * pow(max(0.0, 1.0 - abs(v.y) * 1.4), 3.0) * 0.35;  // faint violet band
     col += (1.0 - alpha) * bg;
   }
@@ -118,9 +121,11 @@ export type SingularityProps = {
   /** follow scroll progress of the page for a slow camera rise */
   scrollTilt?: boolean;
   quality?: "high" | "low";
+  /** follow the cursor: the camera drifts with it, and the disk flares as it nears the horizon */
+  interactive?: boolean;
 };
 
-export function Singularity({ className, mass = 0.7, spin = 1, tilt = 0.16, zoom = 1, offset = [0, 0], scrollTilt, quality = "high" }: SingularityProps) {
+export function Singularity({ className, mass = 0.7, spin = 1, tilt = 0.16, zoom = 1, offset = [0, 0], scrollTilt, quality = "high", interactive }: SingularityProps) {
   const ref = useRef<HTMLCanvasElement>(null);
   const live = useRef({ mass, spin, tilt, zoom, offset });
   live.current = { mass, spin, tilt, zoom, offset };
@@ -161,7 +166,7 @@ export function Singularity({ className, mass = 0.7, spin = 1, tilt = 0.16, zoom
     gl.enableVertexAttribArray(loc);
     gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
     const U = (n: string) => gl.getUniformLocation(prog, n);
-    const u = { res: U("uRes"), time: U("uTime"), tilt: U("uTilt"), mass: U("uMass"), cool: U("uCool"), offset: U("uOffset"), zoom: U("uZoom"), steps: U("uSteps") };
+    const u = { res: U("uRes"), time: U("uTime"), tilt: U("uTilt"), mass: U("uMass"), cool: U("uCool"), offset: U("uOffset"), zoom: U("uZoom"), steps: U("uSteps"), yaw: U("uYaw"), heat: U("uHeat") };
 
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const small = window.matchMedia("(max-width: 720px)").matches;
@@ -185,6 +190,27 @@ export function Singularity({ className, mass = 0.7, spin = 1, tilt = 0.16, zoom
 
     // eased state so prop changes glide instead of snapping
     const cur = { mass: live.current.mass, tilt: live.current.tilt, zoom: live.current.zoom, spin: live.current.spin, cool: live.current.spin === 0 ? 1 : 0, ox: live.current.offset[0], oy: live.current.offset[1] };
+    // cursor, in the shader's own units (short side = 1, centre = 0, y up)
+    const aim = { yaw: 0, lift: 0, heat: 0 };
+    const ptr = { yaw: 0, lift: 0, heat: 0 };
+    const onMove = (e: PointerEvent) => {
+      if (e.pointerType === "touch") return;
+      const r = canvas.getBoundingClientRect();
+      if (e.clientY < r.top || e.clientY > r.bottom) return void Object.assign(aim, { yaw: 0, lift: 0, heat: 0 });
+      const m = Math.min(r.width, r.height);
+      const nx = (e.clientX - r.left - r.width / 2) / m;
+      const ny = -(e.clientY - r.top - r.height / 2) / m;
+      const L = live.current;
+      const d = Math.hypot(nx - L.offset[0], ny - L.offset[1]) / L.zoom;
+      aim.yaw = Math.max(-1, Math.min(1, nx)) * 0.14;
+      aim.lift = Math.max(-1, Math.min(1, ny)) * 0.07;
+      aim.heat = Math.max(0, Math.min(1, (1.25 - d) / 0.9));
+    };
+    const onLeave = () => Object.assign(aim, { yaw: 0, lift: 0, heat: 0 });
+    if (interactive && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      window.addEventListener("pointermove", onMove, { passive: true });
+      document.documentElement.addEventListener("pointerleave", onLeave);
+    }
     let t = 40;
     let last = performance.now();
     let raf = 0;
@@ -201,13 +227,17 @@ export function Singularity({ className, mass = 0.7, spin = 1, tilt = 0.16, zoom
       const k = 1 - Math.exp(-dt * 3.2);
       const scrollT = scrollTilt ? Math.min(1, window.scrollY / Math.max(1, window.innerHeight)) * 0.22 : 0;
       cur.mass += (L.mass - cur.mass) * k;
-      cur.tilt += (L.tilt + scrollT - cur.tilt) * k;
+      const kp = 1 - Math.exp(-dt * 2.2); // the scene follows the hand with a little weight, never twitchy
+      ptr.yaw += (aim.yaw - ptr.yaw) * kp;
+      ptr.lift += (aim.lift - ptr.lift) * kp;
+      ptr.heat += (aim.heat - ptr.heat) * kp;
+      cur.tilt += (L.tilt + scrollT + ptr.lift - cur.tilt) * k;
       cur.zoom += (L.zoom - cur.zoom) * k;
       cur.spin += (L.spin - cur.spin) * k;
       cur.cool += ((L.spin === 0 ? 1 : 0) - cur.cool) * k;
       cur.ox += (L.offset[0] - cur.ox) * k;
       cur.oy += (L.offset[1] - cur.oy) * k;
-      t += dt * cur.spin * 0.16;
+      t += dt * cur.spin * 0.16 * (1 + ptr.heat * 1.4);
       gl.uniform2f(u.res, canvas.width, canvas.height);
       gl.uniform1f(u.time, t);
       gl.uniform1f(u.tilt, cur.tilt);
@@ -216,6 +246,8 @@ export function Singularity({ className, mass = 0.7, spin = 1, tilt = 0.16, zoom
       gl.uniform2f(u.offset, cur.ox, cur.oy);
       gl.uniform1f(u.zoom, cur.zoom);
       gl.uniform1f(u.steps, steps);
+      gl.uniform1f(u.yaw, ptr.yaw);
+      gl.uniform1f(u.heat, ptr.heat);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       // Never let the picture cost the page its responsiveness. On a slow GPU (or none), first drop resolution,
       // then drop the frame rate: a slow disk still reads as a disk; a frozen button does not.
@@ -253,12 +285,14 @@ export function Singularity({ className, mass = 0.7, spin = 1, tilt = 0.16, zoom
     return () => {
       cancelAnimationFrame(raf);
       clearTimeout(timer);
+      window.removeEventListener("pointermove", onMove);
+      document.documentElement.removeEventListener("pointerleave", onLeave);
       ro.disconnect();
       io.disconnect();
       document.removeEventListener("visibilitychange", onVis);
       gl.getExtension("WEBGL_lose_context")?.loseContext();
     };
-  }, [quality, scrollTilt]);
+  }, [quality, scrollTilt, interactive]);
 
   if (failed) return <div aria-hidden className={cx(className)} style={{ background: "radial-gradient(closest-side at 50% 50%, #000 0 13%, #ffe9c8 14.5%, #ffb35a 17%, #e8892c55 26%, transparent 46%), radial-gradient(60% 18% at 50% 52%, #ffb35a66, transparent 70%), #050509" }} />;
   return <canvas ref={ref} aria-hidden role="presentation" className={cx("block", className)} />;
@@ -278,8 +312,39 @@ const RINGS = [0.33, 0.47];
  * Orbit rings and the bodies on them, drawn over a Singularity with the same offset and zoom.
  * Wherever the black hole stands for a company, each body is a team (or an agent) working around its budget.
  */
-export function Orbits({ className, offset = [0, 0], zoom = 1, bodies = TEAM_BODIES }: { className?: string; offset?: [number, number]; zoom?: number; bodies?: Body[] }) {
+export function Orbits({ className, offset = [0, 0], zoom = 1, bodies = TEAM_BODIES, interactive }: { className?: string; offset?: [number, number]; zoom?: number; bodies?: Body[]; interactive?: boolean }) {
   const ref = useRef<SVGSVGElement>(null);
+  const layer = useRef<SVGGElement>(null);
+  const at = useRef({ offset, zoom });
+  at.current = { offset, zoom };
+  // The orbits sit in front of the hole, so they shift a little more than it does: depth, without a single extra asset.
+  useEffect(() => {
+    if (!interactive || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const svg = ref.current;
+    const g = layer.current;
+    if (!svg || !g) return;
+    const reset = () => {
+      g.style.transform = "";
+      g.style.setProperty("--near", "0");
+    };
+    const onMove = (e: PointerEvent) => {
+      if (e.pointerType === "touch") return;
+      const r = svg.getBoundingClientRect();
+      if (e.clientY < r.top || e.clientY > r.bottom) return reset();
+      const m = Math.min(r.width, r.height);
+      const nx = (e.clientX - r.left - r.width / 2) / m;
+      const ny = (e.clientY - r.top - r.height / 2) / m;
+      const d = Math.hypot(nx - at.current.offset[0], ny + at.current.offset[1]) / at.current.zoom;
+      g.style.transform = `translate(${(-nx * 14).toFixed(1)}px, ${(-ny * 10).toFixed(1)}px)`;
+      g.style.setProperty("--near", Math.max(0, Math.min(1, (1.25 - d) / 0.9)).toFixed(2));
+    };
+    window.addEventListener("pointermove", onMove, { passive: true });
+    document.documentElement.addEventListener("pointerleave", reset);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      document.documentElement.removeEventListener("pointerleave", reset);
+    };
+  }, [interactive]);
   const [box, setBox] = useState<{ w: number; h: number } | null>(null);
   useEffect(() => {
     const el = ref.current;
@@ -293,8 +358,9 @@ export function Orbits({ className, offset = [0, 0], zoom = 1, bodies = TEAM_BOD
   const cy = box ? box.h / 2 - offset[1] * m : 0;
   return (
     <svg ref={ref} aria-hidden className={cx_(className)} style={{ transition: "opacity 1.2s ease", opacity: box ? 1 : 0 }}>
+      <g ref={layer} style={{ transition: "transform 0.7s cubic-bezier(0.16, 1, 0.3, 1)" }}>
       {box
-        ? RINGS.map((r, i) => <circle key={r} cx={cx} cy={cy} r={r * zoom * m * 1.7} fill="none" stroke="#f3ebdd" strokeOpacity={i ? 0.1 : 0.16} strokeWidth="1" strokeDasharray="2 7" />)
+        ? RINGS.map((r, i) => <circle key={r} cx={cx} cy={cy} r={r * zoom * m * 1.7} fill="none" stroke="#f3ebdd" strokeWidth="1" strokeDasharray="2 7" style={{ strokeOpacity: `calc(${i ? 0.1 : 0.16} + var(--near, 0) * 0.28)`, transition: "stroke-opacity 0.5s ease" }} />)
         : null}
       {box
         ? bodies.map((b, i) => {
@@ -310,6 +376,7 @@ export function Orbits({ className, offset = [0, 0], zoom = 1, bodies = TEAM_BOD
             );
           })
         : null}
+      </g>
     </svg>
   );
 }

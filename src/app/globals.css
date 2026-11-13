@@ -87,6 +87,14 @@ button:not(:disabled), [role="button"], summary, select, label[for] { cursor: po
 @keyframes shimmer { to { background-position: -200% 0; } }
 @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 @keyframes orbit { to { transform: rotate(360deg); } }
+@keyframes roll-in { from { transform: translateY(105%); } to { transform: none; } }
+@keyframes roll-out { from { transform: none; } to { transform: translateY(-105%); } }
+/* a payment moving along a connector: visible for the first part of the cycle, then it has arrived */
+@keyframes travel-x { 0% { left: 0; opacity: 0; } 3% { opacity: 1; } 22% { left: 100%; opacity: 1; } 25%, 100% { left: 100%; opacity: 0; } }
+@keyframes travel-y { 0% { top: 0; opacity: 0; } 3% { opacity: 1; } 22% { top: 100%; opacity: 1; } 25%, 100% { top: 100%; opacity: 0; } }
+@keyframes fill-x { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes appear { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes caret { 50% { opacity: 0; } }
 @keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 .animate-rise { animation: rise 0.5s var(--ease-out) both; }
 

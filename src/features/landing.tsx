@@ -9,13 +9,7 @@ import { HorizonGauge, Mark, Orbits, Singularity } from "@/components/singularit
 import { Chip, Icon, LinkButton } from "@/components/ui";
 import { IS_TESTNET } from "@/lib/config";
 import { SignInButtons } from "./auth";
-
-const steps = [
-  { title: "Describe it", body: "Say what the product does, who it's for and how they pay. Plain words are enough." },
-  { title: "Review the plan", body: "BuilderOS turns it into steps grouped by team, with a likely cost, a high estimate and a hard cap." },
-  { title: "Launch the company", body: "Your wallet signs the company and its teams onto NEAR. Each team gets its own budget." },
-  { title: "Agents work, you decide", body: "Agents build and report back. Anything over a limit, or from a new seller, waits for you." },
-];
+import { Facts, Flow, PurchasePath, ReportAnatomy, RollingWord, Roles } from "./landing-sections";
 
 export function Landing() {
   const { status, me } = useSession();
@@ -59,13 +53,17 @@ export function Landing() {
       <main id="main">
         <section aria-labelledby="hero-title" className="relative isolate flex min-h-[100dvh] flex-col justify-end overflow-hidden lg:justify-center">
           {/* The company as a black hole: the budget is its mass, teams orbit it, and the cap is the horizon. */}
-          <Singularity scrollTilt mass={0.85} className="absolute inset-0 -z-10 size-full" offset={view.offset} zoom={view.zoom} />
-          <Orbits className="absolute inset-0 -z-10 size-full" offset={view.offset} zoom={view.zoom} />
+          <Singularity scrollTilt interactive mass={0.85} className="absolute inset-0 -z-10 size-full" offset={view.offset} zoom={view.zoom} />
+          <Orbits interactive className="absolute inset-0 -z-10 size-full" offset={view.offset} zoom={view.zoom} />
           <div className="absolute inset-0 -z-10 bg-gradient-to-t from-void via-void/50 to-transparent lg:bg-gradient-to-r lg:from-void lg:via-void/55 lg:to-transparent" />
           <div className="mx-auto w-full max-w-6xl px-4 pt-[46vh] pb-10 sm:px-8 lg:pt-24 lg:pb-16">
-            <div className="animate-rise max-w-[560px]">
-              <h1 id="hero-title" className="max-w-[15ch] text-[40px] leading-[1.04] font-semibold tracking-[-0.03em] text-balance sm:text-[60px]">
-                Describe a product. AI teams build and run it.
+            <div className="animate-rise max-w-[640px]">
+              <h1 id="hero-title" className="text-[40px] leading-[1.06] font-semibold tracking-[-0.03em] sm:text-[56px]">
+                <span className="block">Describe a product.</span>
+                <span className="whitespace-nowrap">
+                  AI <RollingWord words={["teams", "agents"]} />
+                </span>{" "}
+                build and run it.
               </h1>
               <p className="mt-5 max-w-[48ch] text-lg text-ink-2">Every team spends from a budget enforced by smart contracts. You approve anything unusual, see what each team did, and can pause it all in one tap.</p>
               <div id="sign-in" className="mt-8 max-w-[380px] scroll-mt-24">
@@ -82,20 +80,8 @@ export function Landing() {
           <p className="absolute right-8 bottom-8 hidden max-w-[30ch] text-right text-[13px] leading-relaxed text-ink-3 lg:block">The budget is the mass. Teams orbit it. The spending cap is the horizon: nothing gets past it.</p>
         </section>
 
-        <section id="how" aria-labelledby="how-title" className="mx-auto max-w-6xl scroll-mt-8 px-4 py-20 sm:px-8 sm:py-28">
-          <h2 id="how-title" className="max-w-[20ch] text-3xl leading-tight font-semibold sm:text-[40px]">
-            From a sentence to a running company
-          </h2>
-          <ol className="mt-12 grid gap-x-8 gap-y-10 sm:grid-cols-2 lg:grid-cols-4">
-            {steps.map((s, i) => (
-              <li key={s.title} className="relative border-t border-line-strong pt-5">
-                <span className="num absolute -top-3 left-0 bg-void pr-3 text-sm text-ember">{i + 1}</span>
-                <h3 className="text-lg font-semibold">{s.title}</h3>
-                <p className="mt-2 text-ink-2">{s.body}</p>
-              </li>
-            ))}
-          </ol>
-        </section>
+        <Facts />
+        <Flow />
 
         <section aria-labelledby="control-title" className="border-y border-line bg-bg">
           <div className="mx-auto grid max-w-6xl gap-12 px-4 py-20 sm:px-8 sm:py-28 lg:grid-cols-[1fr_1.1fr] lg:items-center">
@@ -153,7 +139,11 @@ export function Landing() {
           </div>
         </section>
 
-        <section className="mx-auto flex max-w-6xl flex-col items-start gap-6 px-4 py-20 sm:flex-row sm:items-center sm:justify-between sm:px-8">
+        <PurchasePath />
+        <ReportAnatomy />
+        <Roles />
+
+        <section className="mx-auto flex max-w-6xl flex-col items-start gap-6 border-t border-line px-4 py-20 sm:flex-row sm:items-center sm:justify-between sm:px-8">
           <h2 className="max-w-[22ch] text-2xl leading-tight font-semibold sm:text-3xl">Look around a company that's already running.</h2>
           <div className="flex flex-wrap gap-3">
             <LinkButton href="/demo" size="lg" icon="play">
