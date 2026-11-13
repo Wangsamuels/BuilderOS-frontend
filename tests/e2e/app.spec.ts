@@ -133,6 +133,16 @@ test.describe("from idea to company", () => {
 
     await expect(wizard).toHaveAttribute("data-step", "funding");
     await expect(page.getByRole("button", { name: "Continue" })).toBeDisabled();
+    // the wallet's own address is shown in full, with a copy button, for a deposit from a faucet or another wallet
+    await expect(page.getByTestId("deposit-address-value")).toHaveText(me.accountId);
+    await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+    await page.getByTestId("deposit-address").getByRole("button", { name: "Copy address" }).click();
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(me.accountId);
+    // a deposit that doesn't cover it yet shows up after "Check balance"; the step stays put
+    await seed.balance(me.accountId, 3);
+    await page.getByTestId("check-balance").click();
+    await expect(page.getByTestId("wallet-balance")).toContainText("3");
+    await expect(page.getByRole("button", { name: "Continue" })).toBeDisabled();
     await page.getByTestId("fund-testnet").click();
     await expect(page.getByRole("button", { name: "Continue" })).toBeEnabled({ timeout: 20_000 });
     await page.getByRole("button", { name: "Continue" }).click();

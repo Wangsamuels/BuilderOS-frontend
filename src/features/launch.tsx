@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { isApiError } from "@/api/client";
 import { endpoints } from "@/api/endpoints";
 import type { Draft } from "@/api/types";
@@ -10,7 +10,7 @@ import { useSession } from "@/auth/session";
 import { AccountShell } from "@/components/shell";
 import { SERIES } from "@/components/charts";
 import { Orbits, Singularity } from "@/components/singularity";
-import { Async, Button, Empty, Field, Icon, Input, LinkButton, Notice, PageHeader, Panel, Skeleton, Spinner } from "@/components/ui";
+import { Async, Button, CopyButton, Empty, Field, Icon, Input, LinkButton, Notice, PageHeader, Panel, Skeleton, Spinner } from "@/components/ui";
 import { IS_TESTNET, TESTNET_FAUCET_URL } from "@/lib/config";
 import { cx, slugify } from "@/lib/format";
 import { near, parseUsd, toBig, usd, usdInput } from "@/lib/money";
@@ -202,8 +202,22 @@ function Wizard({ draft }: { draft: Draft }) {
   const taken = Boolean(creation.data?.slugTaken && !creation.data.founderIsYou);
 
   const required = toBig(funds?.requiredYocto ?? me.data?.funding.recommendedYocto);
-  const available = toBig(funds?.availableYocto ?? me.data?.balance.availableYocto);
+  // the live wallet balance wins once it passes what the server last reported
+  const reported = toBig(funds?.availableYocto);
+  const live = toBig(me.data?.balance.availableYocto);
+  const available = live > reported ? live : reported;
   const enough = available >= required;
+  // while the wallet is short, keep an eye on it: a deposit from a faucet or another wallet shows up by itself
+  const [checking, setChecking] = useState(false);
+  const check = useCallback(async () => {
+    setChecking(true);
+    await qc.invalidateQueries({ queryKey: ["me"] }).finally(() => setChecking(false));
+  }, [qc]);
+  useEffect(() => {
+    if (step !== "funding" || enough) return;
+    const t = setInterval(() => !document.hidden && void qc.invalidateQueries({ queryKey: ["me"] }), 8000);
+    return () => clearInterval(t);
+  }, [step, enough, qc]);
   const fund = useMutation({
     mutationFn: () => endpoints.fundTestnet(),
     onSuccess: async () => {
@@ -377,12 +391,33 @@ function Wizard({ draft }: { draft: Draft }) {
               <div><dt className="text-[13px] text-ink-3">In your wallet</dt><dd className={cx("num mt-0.5 text-xl font-semibold", enough ? "text-green" : "text-amber")} data-testid="wallet-balance">{near(available)}</dd></div>
             </dl>
             {!enough ? (
-              <div className="mt-4 flex flex-wrap items-center gap-3">
-                {IS_TESTNET ? <Button variant="primary" loading={fund.isPending} onClick={() => fund.mutate()} data-testid="fund-testnet">Add testnet NEAR for me</Button> : null}
-                {IS_TESTNET ? <a href={TESTNET_FAUCET_URL} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-sm text-ink-2 underline decoration-line-strong underline-offset-4 hover:text-ink">Open the testnet faucet <Icon name="external" size={13} /></a> : <p className="text-sm text-ink-2">Send NEAR to <span className="num break-all text-ink">{me.data?.accountId}</span>, then come back.</p>}
-              </div>
+              <>
+                {/* the address to send NEAR to: the wallet that signed in, shown in full so it can be checked */}
+                <div className="mt-4 rounded-[12px] border border-line p-4" data-testid="deposit-address">
+                  <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+                    <h3 className="font-sans text-sm font-semibold tracking-normal text-ink">Your wallet address</h3>
+                    <p className="text-[13px] text-ink-3">
+                      Send at least <span className="num text-ink-2">{near(required - available)}</span> more here{IS_TESTNET ? " (testnet NEAR, no real value)" : ""}
+                    </p>
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center gap-3">
+                    <code className="num min-w-0 flex-1 basis-64 rounded-[10px] bg-void/70 px-3 py-2.5 text-[13px] leading-relaxed break-all text-ink select-all" data-testid="deposit-address-value">{me.data?.accountId}</code>
+                    <CopyButton value={me.data?.accountId ?? ""} label="Copy address" />
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-[13px] text-ink-3">
+                    <Button size="sm" variant="ghost" icon="refresh" loading={checking} onClick={() => void check()} data-testid="check-balance">Check balance</Button>
+                    <span role="status">{checking ? "Checking…" : "The balance also updates on its own every few seconds."}</span>
+                  </div>
+                </div>
+                {IS_TESTNET ? (
+                  <div className="mt-4 flex flex-wrap items-center gap-3">
+                    <Button variant={fund.error ? "secondary" : "primary"} loading={fund.isPending} onClick={() => fund.mutate()} data-testid="fund-testnet">Add testnet NEAR for me</Button>
+                    <a href={TESTNET_FAUCET_URL} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-sm text-ink-2 underline decoration-line-strong underline-offset-4 hover:text-ink">Open the testnet faucet <Icon name="external" size={13} /></a>
+                  </div>
+                ) : null}
+              </>
             ) : null}
-            {fund.error ? <div className="mt-4"><Notice tone="red">{(fund.error as Error).message}</Notice></div> : null}
+            {fund.error && !enough ? <div className="mt-4"><Notice tone="amber">The automatic top-up isn't available right now ({(fund.error as Error).message}). Copy your address above and use the faucet, or send NEAR from another wallet.</Notice></div> : null}
             <div className="mt-6 flex justify-between"><Button variant="ghost" onClick={() => go("teams")}>Back</Button><Button variant="primary" disabled={!enough} onClick={() => go("sign")}>Continue</Button></div>
           </div>
         ) : null}
