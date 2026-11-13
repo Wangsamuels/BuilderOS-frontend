@@ -9,7 +9,7 @@ import { HorizonGauge, Mark, Orbits, Singularity } from "@/components/singularit
 import { Chip, Icon, LinkButton } from "@/components/ui";
 import { IS_TESTNET } from "@/lib/config";
 import { SignInButtons } from "./auth";
-import { Facts, Flow, PurchasePath, ReportAnatomy, RollingWord, Roles } from "./landing-sections";
+import { Facts, Flow, LandingNav, PurchasePath, ReportAnatomy, RollingWord, Roles } from "./landing-sections";
 
 export function Landing() {
   const { status, me } = useSession();
@@ -35,20 +35,7 @@ export function Landing() {
 
   return (
     <div className="bg-void">
-      <header className="absolute inset-x-0 top-0 z-20 flex h-16 items-center justify-between px-4 sm:px-8">
-        <Link href="/" className="flex items-center gap-2 font-display text-lg font-semibold">
-          <Mark size={30} /> BuilderOS
-          {IS_TESTNET ? <Chip className="ml-1">Testnet</Chip> : null}
-        </Link>
-        <nav className="flex items-center gap-1 text-sm">
-          <a href="#how" className="hidden rounded-full px-3 py-2 text-ink-2 hover:text-ink sm:block">
-            How it works
-          </a>
-          <LinkButton href="/demo" variant="ghost" size="sm">
-            See a demo
-          </LinkButton>
-        </nav>
-      </header>
+      <LandingNav />
 
       <main id="main">
         <section aria-labelledby="hero-title" className="relative isolate flex min-h-[100dvh] flex-col justify-end overflow-hidden lg:justify-center">
@@ -83,7 +70,7 @@ export function Landing() {
         <Facts />
         <Flow />
 
-        <section aria-labelledby="control-title" className="border-y border-line bg-bg">
+        <section id="control" aria-labelledby="control-title" className="scroll-mt-8 border-y border-line bg-bg">
           <div className="mx-auto grid max-w-6xl gap-12 px-4 py-20 sm:px-8 sm:py-28 lg:grid-cols-[1fr_1.1fr] lg:items-center">
             <div>
               <h2 id="control-title" className="max-w-[18ch] text-3xl leading-tight font-semibold sm:text-[40px]">

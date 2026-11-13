@@ -49,6 +49,7 @@
 }
 
 html {
+  scroll-behavior: smooth;
   background: var(--color-bg);
   color: var(--color-ink);
   color-scheme: dark;

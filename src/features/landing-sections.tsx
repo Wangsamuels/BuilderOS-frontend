@@ -1,7 +1,10 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Chip, Icon } from "@/components/ui";
+import { Mark } from "@/components/singularity";
+import { Chip, Icon, LinkButton } from "@/components/ui";
+import { IS_TESTNET } from "@/lib/config";
 import { cx } from "@/lib/format";
 
 /* ---------- small hooks ---------- */
@@ -314,7 +317,7 @@ export function PurchasePath() {
   const play = inView && motion;
   const hop = 1.25; // seconds a payment takes between two stops
   return (
-    <section aria-labelledby="path-title" className="mx-auto max-w-6xl px-4 py-20 sm:px-8 sm:py-28">
+    <section id="purchases" aria-labelledby="path-title" className="scroll-mt-8 mx-auto max-w-6xl px-4 py-20 sm:px-8 sm:py-28">
       <h2 id="path-title" className="max-w-[22ch] text-3xl leading-tight font-semibold sm:text-[40px]">
         Every purchase takes one of two paths
       </h2>
@@ -350,7 +353,7 @@ export function ReportAnatomy() {
     </div>
   );
   return (
-    <section aria-labelledby="report-title" className="border-y border-line bg-bg">
+    <section id="reports" aria-labelledby="report-title" className="scroll-mt-8 border-y border-line bg-bg">
       <div className="mx-auto grid max-w-6xl gap-12 px-4 py-20 sm:px-8 sm:py-28 lg:grid-cols-[1fr_1.1fr] lg:items-center">
         <div>
           <h2 id="report-title" className="max-w-[18ch] text-3xl leading-tight font-semibold sm:text-[40px]">
@@ -404,7 +407,7 @@ const ROLES: Array<[string, string, string]> = [
 ];
 export function Roles() {
   return (
-    <section aria-labelledby="roles-title" className="mx-auto max-w-6xl px-4 py-20 sm:px-8 sm:py-28">
+    <section id="access" aria-labelledby="roles-title" className="scroll-mt-8 mx-auto max-w-6xl px-4 py-20 sm:px-8 sm:py-28">
       <div className="grid gap-10 lg:grid-cols-[0.8fr_1.2fr] lg:gap-14">
         <div>
           <h2 id="roles-title" className="max-w-[16ch] text-3xl leading-tight font-semibold sm:text-[40px]">
@@ -438,5 +441,106 @@ export function Roles() {
         </div>
       </div>
     </section>
+  );
+}
+
+/* ---------- the menu bar ---------- */
+const SECTIONS = [
+  ["how", "How it works"],
+  ["control", "Control"],
+  ["purchases", "Purchases"],
+  ["reports", "Reports"],
+  ["access", "Access"],
+] as const;
+
+/**
+ * The landing's menu bar. It floats clear over the hero and takes a solid backing once the page scrolls,
+ * marks the section being read, and folds into a sheet on phones.
+ */
+export function LandingNav() {
+  const [solid, setSolid] = useState(false);
+  const [active, setActive] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    const onScroll = () => setSolid(window.scrollY > 24);
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    // the section crossing the middle of the screen is the one being read
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          if (e.isIntersecting) setActive(e.target.id);
+          else setActive((a) => (a === e.target.id ? null : a));
+        }
+      },
+      { rootMargin: "-45% 0px -50% 0px" },
+    );
+    for (const [id] of SECTIONS) {
+      const el = document.getElementById(id);
+      if (el) io.observe(el);
+    }
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      io.disconnect();
+    };
+  }, []);
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
+
+  return (
+    <header className={cx("fixed inset-x-0 top-0 z-30 transition-[background-color,border-color,backdrop-filter] duration-300", solid || open ? "border-b border-line bg-void/80 backdrop-blur-md" : "border-b border-transparent")}>
+      <div className="mx-auto flex h-16 max-w-[1400px] items-center gap-4 px-4 sm:px-8">
+        <Link href="/" className="flex items-center gap-2 font-display text-lg font-semibold">
+          <Mark size={30} /> BuilderOS
+          {IS_TESTNET ? <Chip className="ml-1">Testnet</Chip> : null}
+        </Link>
+        <nav aria-label="Sections" className="ml-auto hidden items-center gap-1 text-sm lg:flex">
+          {SECTIONS.map(([id, label]) => (
+            <a key={id} href={`#${id}`} aria-current={active === id ? "true" : undefined} className={cx("relative rounded-full px-3 py-2 transition-colors", active === id ? "text-ink" : "text-ink-2 hover:text-ink")}>
+              {label}
+              <span aria-hidden className={cx("absolute inset-x-3 -bottom-px h-px origin-left bg-ember transition-transform duration-300", active === id ? "scale-x-100" : "scale-x-0")} />
+            </a>
+          ))}
+        </nav>
+        <div className="ml-auto flex items-center gap-2 lg:ml-3">
+          <LinkButton href="/demo" variant="ghost" size="sm" className="hidden sm:inline-flex">
+            See a demo
+          </LinkButton>
+          <a href="#sign-in" className={cx("hidden h-9 items-center rounded-full bg-ember px-4 text-sm font-semibold text-[#1a1206] transition-opacity duration-300 hover:bg-[#ffc37d] sm:inline-flex", solid ? "opacity-100" : "pointer-events-none opacity-0")} tabIndex={solid ? 0 : -1} aria-hidden={!solid}>
+            Start building
+          </a>
+          <button type="button" aria-label={open ? "Close menu" : "Open menu"} aria-expanded={open} aria-controls="landing-menu" onClick={() => setOpen((v) => !v)} className="grid size-10 place-items-center rounded-full text-ink hover:bg-raised lg:hidden" data-testid="landing-menu-button">
+            <Icon name={open ? "x" : "menu"} size={18} />
+          </button>
+        </div>
+      </div>
+      {open ? (
+        <nav id="landing-menu" aria-label="Sections" className="border-t border-line px-4 pt-2 pb-5 sm:px-8 lg:hidden">
+          <ul>
+            {SECTIONS.map(([id, label]) => (
+              <li key={id}>
+                <a href={`#${id}`} onClick={() => setOpen(false)} className={cx("flex h-12 items-center justify-between border-b border-line text-[15px]", active === id ? "text-ember" : "text-ink")}>
+                  {label}
+                  <Icon name="right" className="text-ink-3" />
+                </a>
+              </li>
+            ))}
+          </ul>
+          <div className="mt-4 grid grid-cols-2 gap-2">
+            <LinkButton href="/demo" icon="play">
+              See a demo
+            </LinkButton>
+            <a href="#sign-in" onClick={() => setOpen(false)} className="inline-flex h-10 items-center justify-center rounded-full bg-ember text-sm font-semibold text-[#1a1206]">
+              Start building
+            </a>
+          </div>
+        </nav>
+      ) : null}
+    </header>
   );
 }
