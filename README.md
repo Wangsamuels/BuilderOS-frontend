@@ -1,6 +1,18 @@
 # BuilderOS web app
 
-The frontend for BuilderOS: describe a product, review the plan, launch a company on NEAR, and watch teams of AI agents build it on budgets you control.
+The frontend for BuilderOS: describe a product, review the plan, launch a company on NEAR, and watch teams of AI agents build it on budgets that NEAR smart contracts enforce. The wallet signs every write; the backend never moves money.
+
+Built for **NEAR HACKATHON** (1–14 Nov 2026). Status: **NEAR testnet**. The full project description, what NEAR does, reproduction steps and the hackathon disclosures are in the [backend README](https://github.com/Wangsamuels/BuilderOS#readme).
+
+| | |
+|---|---|
+| Frontend (this repo) | https://github.com/Wangsamuels/BuilderOS-frontend |
+| Backend and contracts | https://github.com/Wangsamuels/BuilderOS |
+| Hosted app | https://builder-os-eight.vercel.app (no sign-in needed: **See a sample company**) |
+| Hosted API | https://builderos-api-sam-77caab77f14e.herokuapp.com |
+| Tracks | `agents`, `swarms`, `business` |
+| Submission tag | `hackathon-submission` (in both repos) |
+| Other project by the same author (rule Q-015) | **Kronos**, a security layer for DeFi lending: https://github.com/Wangsamuels/Kronos-backend. Independent project, separate codebase, separate submission. |
 
 Built against API contract `2026-11-13` (`docs/API-CONTRACT.md` in the backend repo). If this app and the contract disagree, the contract wins.
 
@@ -65,8 +77,12 @@ The company is drawn as a black hole (`components/singularity.tsx`, a ray-marche
 
 It drops resolution, then frame rate, on slow GPUs, pauses off-screen, and renders a single frame when the system asks for reduced motion.
 
-## Before going live
+## Hackathon disclosures
 
-1. Create the Privy app, enable NEAR embedded wallets, and set `NEXT_PUBLIC_PRIVY_APP_ID` (and `PRIVY_APP_ID` on the API).
-2. Add the deployed origin to the API's CORS allow-list.
-3. Run through sign-in, launch and an approval on testnet: the end-to-end suite proves the app against the contract's shapes, not against live testnet or the real Privy and wallet-selector SDKs.
+- **Window (Q-001 to Q-004):** every line in this repository was written during the hackathon; the first commit is dated 13 Nov 2026. An earlier BuilderOS web app built during the hackathon (`builder-os-mu.vercel.app`) gave the black-hole visual concept and was replaced by this repository. The submitted state is tagged `hackathon-submission`.
+- **AI tools (Q-005):** Claude (Anthropic) wrote large parts of this app, its tests and this README; the author directed the design and reviewed and ran everything.
+- **Libraries:** Next.js 16, React 19, Tailwind 4, TanStack Query, Privy, NEAR wallet-selector (MyNearWallet, Meteor), qrcode-generator, Playwright. No third-party UI templates.
+
+## License
+
+MIT. See [`LICENSE`](LICENSE).
