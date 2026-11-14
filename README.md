@@ -10,7 +10,7 @@ Built for **NEAR HACKATHON** (1–14 Nov 2026). Status: **NEAR testnet**. The fu
 | Backend and contracts | https://github.com/Wangsamuels/BuilderOS |
 | Hosted app | https://builder-os-eight.vercel.app (no sign-in needed: **See a sample company**) |
 | Hosted API | https://builderos-api-sam-77caab77f14e.herokuapp.com |
-| Tracks | `agents`, `swarms`, `business` |
+| Tracks | `business`, `agents`, `swarms`, `security`, `defi`, `privacy`, `realworld`, `open` ([how each fits](https://github.com/Wangsamuels/BuilderOS#tracks)) |
 | Submission tag | `hackathon-submission` (in both repos) |
 | Other project by the same author (rule Q-015) | **Kronos**, a security layer for DeFi lending: https://github.com/Wangsamuels/Kronos-backend. Independent project, separate codebase, separate submission. |
 
