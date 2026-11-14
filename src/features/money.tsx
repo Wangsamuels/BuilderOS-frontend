@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery } from "@tanstack/react-query";
 import qrcode from "qrcode-generator";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { isApiError } from "@/api/client";
 import { endpoints } from "@/api/endpoints";
 import type { Receipt, Team, WithdrawalChain } from "@/api/types";
@@ -240,6 +240,7 @@ function Funding() {
 /* ---------- ledger ---------- */
 const KIND: Record<string, string> = { payment: "Payment", purchase: "Purchase", deposit: "Deposit", topup: "Top-up", withdrawal: "Withdrawal", revenue: "Revenue", membership: "Membership", keys_policy: "Keys" };
 const kindLabel = (k: string) => KIND[k] ?? titleCase(k);
+const WITHDRAWAL_OUTCOME: Record<string, string> = { done: "Delivered", refunded: "Returned to the treasury", failed: "Failed in transit" };
 
 function ReceiptDialog({ id, onClose }: { id: string; onClose: () => void }) {
   const q = useQuery({ queryKey: ["receipt", id], queryFn: () => endpoints.receipt(id).then((r) => r.receipt) });
@@ -254,6 +255,10 @@ function ReceiptDialog({ id, onClose }: { id: string; onClose: () => void }) {
                 ["Kind", kindLabel(r.kind)],
                 ["Team", teamOf(r.departmentId) || "Company"],
                 ["When", dateTime(r.createdAt)],
+                ...(r.kind === "withdrawal" && r.payload?.status ? ([["Outcome", WITHDRAWAL_OUTCOME[String(r.payload.status)] ?? titleCase(String(r.payload.status))]] as Array<[string, string]>) : []),
+                ...(r.kind === "withdrawal" && r.payload?.to ? ([["Sent to", <span key="to" className="num break-all">{String(r.payload.to)}</span>]] as Array<[string, React.ReactNode]>) : []),
+                ...(r.kind === "withdrawal" && r.payload?.amount_out && r.payload.status === "done" ? ([["Received", <span key="ao" className="num">{usd(String(r.payload.amount_out))}</span>]] as Array<[string, React.ReactNode]>) : []),
+                ...(r.kind === "withdrawal" && r.payload?.fees && toBig(String(r.payload.fees)) > 0n ? ([["Fee", <span key="fe" className="num">{usd(String(r.payload.fees))}</span>]] as Array<[string, React.ReactNode]>) : []),
                 ...(r.payload?.seller ? ([["Seller", String(r.payload.seller)]] as Array<[string, string]>) : []),
                 ...(r.payload?.model ? ([["Model", String(r.payload.model)]] as Array<[string, string]>) : []),
                 ...(r.rail ? ([["Rail", r.rail]] as Array<[string, string]>) : []),
@@ -373,15 +378,28 @@ function Withdraw({ onClose }: { onClose: () => void }) {
   const short = isApiError(plan.error, "insufficient_funds");
   // the server words the shortfall in raw units ("only 0 available"); say it in dollars
   const have = short ? /only (\d+) available/.exec((plan.error as Error).message)?.[1] : undefined;
-  const fee = sum((p?.sources ?? []).map((x) => x.estFee ?? "0"));
+  const fee = p?.quote?.fees ?? sum((p?.sources ?? []).map((x) => x.estFee ?? "0"));
+  const arrives = p?.quote?.amountOut ?? p?.amount ?? "0";
+  const deadline = p?.quote?.deadline ? new Date(p.quote.deadline) : null;
+  const [expired, setExpired] = useState(false);
+  // a quote for another chain holds for a limited time; past it the contract's transfer would go to a dead quote
+  useEffect(() => {
+    setExpired(false);
+    if (!deadline) return;
+    const ms = deadline.getTime() - Date.now() - 30_000; // stop half a minute early: signing takes a moment
+    if (ms <= 0) return setExpired(true);
+    const t = setTimeout(() => setExpired(true), Math.min(ms, 2_000_000_000));
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [p?.withdrawalId]);
 
   const sign = async () => {
-    if (!plan.data || !p) return;
+    if (!plan.data || !p || expired) return;
     const ok = await run({
       title: "Withdraw funds",
       summary: (
         <>
-          <span className="num text-ink">{usd(p.amount)}</span> leaves the company for <span className="num text-ink">{shortAccount(p.to)}</span> on {net.label}.
+          <span className="num text-ink">{usd(p.amount)}</span> leaves the company treasury; <span className="num text-ink">{usd(arrives)}</span> arrives at <span className="num text-ink">{shortAccount(p.to)}</span> on {net.label}.
         </>
       ),
       // the plan already carries the transaction for this exact withdrawal; sign that one
@@ -401,7 +419,11 @@ function Withdraw({ onClose }: { onClose: () => void }) {
         p ? (
           <>
             <Button variant="ghost" onClick={() => plan.reset()}>Back</Button>
-            <Button action variant="primary" loading={Boolean(pending)} onClick={() => void sign()} data-testid="confirm-withdrawal">Withdraw {usd(p.amount)}</Button>
+            {expired ? (
+              <Button action variant="primary" loading={plan.isPending} onClick={() => plan.mutate()} data-testid="refresh-withdrawal">Get a new quote</Button>
+            ) : (
+              <Button action variant="primary" loading={Boolean(pending)} onClick={() => void sign()} data-testid="confirm-withdrawal">Withdraw {usd(p.amount)}</Button>
+            )}
           </>
         ) : (
           <>
@@ -419,10 +441,23 @@ function Withdraw({ onClose }: { onClose: () => void }) {
             rows={[
               ["To", <span key="t" className="num break-all">{p.to}</span>],
               ...p.sources.map((x) => [`From ${(SOURCE[x.from] ?? x.from).toLowerCase()}`, <span key={x.from} className="num">{usd(x.amount)}</span>] as [string, React.ReactNode]),
-              ["Estimated fee", <span key="f" className="num">{toBig(fee) > 0n ? usd(fee) : "None"}</span>],
+              ["Fee", <span key="f" className="num">{toBig(fee) > 0n ? usd(fee) : "None"}</span>],
+              ["You receive", <span key="r" className="num font-semibold text-ink" data-testid="withdrawal-receive">{usd(arrives)}</span>],
+              ...(deadline ? ([["Quote holds until", <span key="d" className="num">{deadline.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>]] as Array<[string, React.ReactNode]>) : []),
             ]}
           />
-          <div className="mt-4"><Notice tone="amber">Check the address and network. A withdrawal can't be reversed once your wallet has signed it.</Notice></div>
+          <p className="mt-3 text-[13px] leading-relaxed text-ink-3">
+            {p.route === "swap"
+              ? `Your signature moves the funds out of the treasury to a one-time account for this quote; USDC is then delivered on ${net.label}. If delivery can't complete, the funds return to the treasury.`
+              : "Your signature moves the funds straight from the treasury to this NEAR account."}
+          </p>
+          <div className="mt-4" data-testid={expired ? "withdrawal-expired" : undefined}>
+            {expired ? (
+              <Notice tone="amber">This quote has run out. Nothing was moved. Get a new quote to continue.</Notice>
+            ) : (
+              <Notice tone="amber">Check the address and network. A withdrawal can't be reversed once your wallet has signed it.</Notice>
+            )}
+          </div>
         </div>
       ) : (
         <form className="space-y-4" onSubmit={(e) => (e.preventDefault(), micro && addressOk && plan.mutate())}>
@@ -489,11 +524,17 @@ function Deposit({ onClose }: { onClose: () => void }) {
                 <>
                   <Qr value={address} size={200} />
                   <div className="w-full">
-                    <div className="text-[13px] text-ink-3">{company ? "Company deposit address" : `${titleCase(pick!.team)} team address`}</div>
+                    <div className="text-[13px] text-ink-3">{company ? "Company treasury account (NEAR Intents)" : `${titleCase(pick!.team)} team address`}</div>
                     <code className="num mt-1.5 block rounded-[10px] bg-void/70 px-3 py-2.5 text-[13px] leading-relaxed break-all text-ink select-all" data-testid="deposit-dialog-address">{address}</code>
                   </div>
                   <CopyButton value={address} label="Copy address" />
-                  <div className="w-full text-left"><Notice tone="amber">Send only USDC on {network}. Other tokens or networks won't arrive.</Notice></div>
+                  <div className="w-full text-left">
+                    <Notice tone="amber">
+                      {company
+                        ? "Deposit USDC through NEAR Intents with this account as the receiver. A plain token transfer to this account is not credited to the treasury."
+                        : `Send only USDC on ${network}. Other tokens or networks won't arrive.`}
+                    </Notice>
+                  </div>
                   <dl className="flex w-full items-baseline justify-between gap-3 border-t border-line pt-3 text-sm">
                     <dt className="text-ink-3">{company || !pick ? "Funded so far" : `${titleCase(pick.team)} holds`}</dt>
                     <dd className="num font-semibold" data-testid="deposit-dialog-balance">{usd(company || !pick ? d.balance : pick.balance)}</dd>

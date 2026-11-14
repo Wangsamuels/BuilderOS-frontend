@@ -27,7 +27,7 @@ The backend must allow the app's origin (CORS) and, for Privy sign-in, have the 
 ```bash
 npm run typecheck
 npm run build
-npm run test:e2e     # 45 end-to-end tests: desktop + phone
+npm run test:e2e     # 46 end-to-end tests: desktop + phone
 ```
 
 The end-to-end run builds the app against `tests/mock-api` (the contract's shapes with a simulated chain) and signs with a throwaway in-browser key. It never touches testnet. It uses the Chrome installed on the machine; to use Playwright's own browser, run `npx playwright install chromium` and remove `channel` in `playwright.config.ts`.

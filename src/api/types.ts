@@ -194,5 +194,17 @@ export type StreamEvent = { id: number; event: string; companyId: string | null;
 
 export type WithdrawalChain = "near" | "base" | "ethereum" | "arbitrum" | "solana";
 export type WithdrawalPlan = {
-  plan: { withdrawalId: string; amount: Micro; token: string; to: string; chain: WithdrawalChain; sources: Array<{ from: "intents" | "tempo" | string; amount: Micro; estFee?: Micro }>; available: { intents: Micro; tempoUnreserved: Micro } };
+  plan: {
+    withdrawalId: string;
+    amount: Micro;
+    token: string;
+    to: string;
+    chain: WithdrawalChain;
+    /** "near": straight to a NEAR account. "swap": delivered on another chain through a quote. */
+    route?: "near" | "swap";
+    sources: Array<{ from: "intents" | "tempo" | string; amount: Micro; estFee?: Micro }>;
+    available: { intents: Micro; tempoUnreserved: Micro };
+    /** What arrives, and until when the wallet must sign (null when there is no quote to expire). */
+    quote?: { amountOut: Micro; fees: Micro; deadline: string | null; quoteId: string | null; depositAddress: string | null; destinationAsset: string };
+  };
 } & WithTx;

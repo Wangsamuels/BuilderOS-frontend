@@ -720,12 +720,59 @@ test.describe("money", () => {
     await expect(plan).toContainText("0x7b1E4c0f2A9d53e8C6B4a1F09d2E7c5B8a3F6D10");
     await expect(plan).toContainText("From company treasury");
     await expect(plan).toContainText("can't be reversed");
+    // another chain goes through a quote: the fee, what arrives and how long the quote holds are shown before signing
+    await expect(plan).toContainText("$0.04");
+    await expect(page.getByTestId("withdrawal-receive")).toHaveText("$39.96");
+    await expect(plan).toContainText("Quote holds until");
+    await expect(plan).toContainText("one-time account for this quote");
     await page.getByTestId("confirm-withdrawal").click();
     await signed(page);
 
     await expect(page.getByTestId("deposit-balance")).toHaveText("$60.00");
     await expect(page.getByTestId("ledger-row").first()).toContainText("Withdrawal");
     await expect(page.getByTestId("ledger-row").first()).toContainText("$40.00");
+    await page.getByTestId("ledger-row").first().click();
+    await expect(page.getByTestId("receipt-detail")).toContainText("Delivered");
+    await expect(page.getByTestId("receipt-detail")).toContainText("$39.96");
+  });
+
+  test("a withdrawal quote that runs out can't be signed; a company on an old contract is told to upgrade", async ({ page }) => {
+    await founderOf();
+    await seed.deposit("lumen", "build", 100);
+    await signIn(page);
+    await page.goto("/c/lumen/money");
+    await page.getByTestId("withdraw").click();
+    await page.getByTestId("withdraw-amount").fill("10");
+    await page.getByTestId("withdraw-chain").selectOption("base");
+    await page.getByTestId("withdraw-to").fill("0x7b1E4c0f2A9d53e8C6B4a1F09d2E7c5B8a3F6D10");
+
+    // the quote service is down: said plainly, nothing to sign
+    await seed.quotes({ down: true });
+    await page.getByTestId("review-withdrawal").click();
+    await expect(page.getByText("Couldn't get a quote for this withdrawal right now")).toBeVisible();
+    await expect(page.getByTestId("withdrawal-plan")).toHaveCount(0);
+
+    // a quote that has already run out: signing is replaced by getting a new one
+    await seed.quotes({ down: false, ttlMs: 1000 });
+    await page.getByTestId("review-withdrawal").click();
+    await expect(page.getByTestId("withdrawal-expired")).toContainText("This quote has run out");
+    await expect(page.getByTestId("confirm-withdrawal")).toHaveCount(0);
+    await seed.quotes({ ttlMs: 20 * 60_000 });
+    await page.getByTestId("refresh-withdrawal").click();
+    await expect(page.getByTestId("confirm-withdrawal")).toBeVisible();
+    await expect(page.getByTestId("withdrawal-expired")).toHaveCount(0);
+    await page.keyboard.press("Escape");
+
+    // a company created before contract version 4 can't withdraw until it is upgraded
+    await founderOf("legacy", { name: "Legacy Co", version: 3 });
+    await seed.deposit("legacy", "build", 50);
+    await page.goto("/c/legacy/money");
+    await page.getByTestId("withdraw").click();
+    await page.getByTestId("withdraw-amount").fill("5");
+    await page.getByTestId("withdraw-to").fill("founder.testnet");
+    await page.getByTestId("review-withdrawal").click();
+    await expect(page.getByText("This company needs a contract upgrade for this feature.")).toBeVisible();
+    await expect(page.getByTestId("withdrawal-plan")).toHaveCount(0);
   });
 
   test("only the founder sees Withdraw", async ({ page }) => {

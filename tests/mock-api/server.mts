@@ -45,6 +45,10 @@ let streamTokens = new Map<string, string>();
 let streams: Array<{ res: ServerResponse; accountId: string; lastEventId: number }> = [];
 let streamLog: Array<{ accountId: string; lastEventId: number }> = [];
 let privyEmailOff = new Set<string>();
+let quotesDown = false;
+let quoteTtlMs = 20 * 60_000;
+const usedWithdrawals = new Set<string>();
+const USDC_INTENTS = "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1";
 let seq = 0;
 const nid = (p: string) => `${p}_${(++seq).toString(36)}${randomBytes(3).toString("hex")}`;
 
@@ -324,7 +328,7 @@ function populate(c: Company) {
   );
 }
 function makeCompany(slug: string, name: string, founder: string, opts: { teams?: Array<{ team: string; monthlyCap: bigint }>; dailyCap?: bigint; version?: number; filled?: boolean } = {}) {
-  const c: Company = { id: companyId(slug), slug, name, founder, frozen: false, dailyCap: opts.dailyCap ?? micro(50), spentToday: 0n, codeKeyVersion: 1, contractVersion: opts.version ?? 3, createdAt: iso(now() - (opts.filled ? 34 * DAY : 0)), teams: [], members: new Map(), viewKeys: new Map(), approvals: [], reports: [], receipts: [], plans: [], tasks: [], wrapped: 0 };
+  const c: Company = { id: companyId(slug), slug, name, founder, frozen: false, dailyCap: opts.dailyCap ?? micro(50), spentToday: 0n, codeKeyVersion: 1, contractVersion: opts.version ?? 4, createdAt: iso(now() - (opts.filled ? 34 * DAY : 0)), teams: [], members: new Map(), viewKeys: new Map(), approvals: [], reports: [], receipts: [], plans: [], tasks: [], wrapped: 0 };
   for (const t of opts.teams ?? []) addTeam(c, t.team, t.monthlyCap);
   companies.set(slug, c);
   if (opts.filled) {
@@ -463,10 +467,12 @@ function applyTx(accountId: string, t: Json): string {
     } else if (methodName === "revoke") { founderOnly(c); c.members.delete(args.account); c.viewKeys.delete(args.account); emit("grant_revoked", c, { account: args.account }); }
     else if (methodName === "request_withdrawal") {
       founderOnly(c);
+      if (usedWithdrawals.has(args.withdrawal_id)) fail("Smart contract panicked: this withdrawal was already requested");
+      usedWithdrawals.add(args.withdrawal_id);
       let left = BigInt(args.amount);
       for (const team of c.teams) { const take = team.funded < left ? team.funded : left; team.funded -= take; left -= take; }
       if (left > 0n) fail("Smart contract panicked: not enough funds to withdraw");
-      c.receipts.unshift({ id: nid("rcpt"), kind: "withdrawal", companyId: c.id, departmentId: null, actor: accountId, amount: args.amount, token: "USDC", rail: args.chain, chainId: null, foreignTx: null, verifiedOnChain: true, requestId: args.withdrawal_id, payload: { seller: `Withdrawal to ${args.to}`, to: args.to }, nearTx: hash, createdAt: iso(now()) });
+      c.receipts.unshift({ id: nid("rcpt"), kind: "withdrawal", companyId: c.id, departmentId: null, actor: accountId, amount: args.amount, token: "USDC", rail: args.chain, chainId: null, foreignTx: null, verifiedOnChain: true, requestId: args.withdrawal_id, payload: { seller: `Withdrawal to ${args.to}`, to: args.to, chain: args.chain, status: "done", amount_out: args.route === "swap" ? (BigInt(args.amount) - BigInt(args.amount) / 1000n).toString() : args.amount, fees: args.route === "swap" ? (BigInt(args.amount) / 1000n).toString() : "0", withdrawal_id: args.withdrawal_id }, nearTx: hash, createdAt: iso(now()) });
       emit("withdrawal_requested", c, { company_id: c.id, withdrawal_id: args.withdrawal_id, amount: args.amount, token: "usdc", to: args.to });
     }
     else if (methodName === "register_view_key") { if (!access(c, accountId)) fail("Smart contract panicked: not a member"); }
@@ -712,8 +718,18 @@ on("POST", "/v1/withdrawals", ({ me, body }) => {
   const available = c.teams.reduce((n, t) => n + t.funded, 0n); // stands in for the company treasury
   const want = BigInt(body.amount);
   if (want > available) throw new Http(409, "insufficient_funds", `only ${available} available (reserved funds are excluded)`);
+  if (c.contractVersion < 4) throw new Http(409, "contract_upgrade_required", `This company runs contract version ${c.contractVersion}; withdrawals need version 4. The founder must upgrade the company contract first.`, { feature: "withdrawals", currentVersion: c.contractVersion, requiredVersion: 4, how: "propose_upgrade → wait 24 h → apply_upgrade with the new company.wasm" });
+  if (quotesDown) throw new Http(503, "unavailable", "Couldn't get a quote for this withdrawal right now. Nothing was moved; try again in a minute.");
   const withdrawalId = nid("wd");
-  return { plan: { withdrawalId, amount: body.amount, token: "usdc", to: body.to, chain: body.chain ?? "near", sources: [{ from: "intents", amount: body.amount }], available: { intents: available.toString(), tempoUnreserved: "0" } }, transaction: tx(c.id, "request_withdrawal", { withdrawal_id: withdrawalId, amount: body.amount, to: body.to, chain: body.chain ?? "near" }, "1", me.id) };
+  const chain = body.chain ?? "near";
+  const swap = chain !== "near";
+  const fees = swap ? want / 1000n : 0n;
+  const depositAddress = swap ? Array.from({ length: 64 }, (_, i) => "0123456789abcdef"[(i * 7 + withdrawalId.length) % 16]).join("") : null;
+  const quote = { amountOut: (want - fees).toString(), fees: fees.toString(), deadline: swap ? iso(now() + quoteTtlMs) : null, quoteId: swap ? nid("q") : null, depositAddress, destinationAsset: swap ? `nep141:${chain}-usdc.omft.near` : USDC_INTENTS };
+  return {
+    plan: { withdrawalId, amount: body.amount, token: "usdc", to: body.to, chain, route: swap ? "swap" : "near", sources: [{ from: "intents", amount: body.amount, estFee: fees.toString() }], available: { intents: available.toString(), tempoUnreserved: "0" }, quote },
+    transaction: tx(c.id, "request_withdrawal", { withdrawal_id: withdrawalId, amount: body.amount, token: "usdc", to: body.to, chain, route: swap ? "swap" : "near", token_id: USDC_INTENTS, deposit_address: depositAddress, quote_id: quote.quoteId }, "1", me.id),
+  };
 });
 on("POST", "/v1/withdraw/quote", notImplemented("withdraw.quote", "unsupported", "Withdrawal quotes aren't a separate step.", "POST /v1/withdrawals (the plan is the quote)"));
 on("GET", "/v1/services", notImplemented("services", "planned", "Recurring services aren't available yet."));
@@ -886,6 +902,7 @@ pub("POST", "/__test/company", ({ body }) => { account(body.founder); const c = 
 pub("POST", "/__test/grant", ({ body }) => { const c = company(body.slug); account(body.accountId); c.members.set(body.accountId, { scopes: body.scopes ?? [], admin: Boolean(body.admin), departmentId: body.team ? dept(body.team, c.slug) : null }); emit("grant_set", c, { account: body.accountId }); return { ok: true }; });
 pub("POST", "/__test/revoke", ({ body }) => { const c = company(body.slug); c.members.delete(body.accountId); return { ok: true }; });
 pub("POST", "/__test/balance", ({ body }) => { account(body.accountId).balance = BigInt(Math.round(body.near * 100)) * (NEAR / 100n); return { ok: true }; });
+pub("POST", "/__test/quotes", ({ body }) => { if (body.down !== undefined) quotesDown = Boolean(body.down); if (body.ttlMs !== undefined) quoteTtlMs = Number(body.ttlMs); return { ok: true }; });
 pub("POST", "/__test/privy-email-off", ({ body }) => { privyEmailOff.add(body.accountId); return { ok: true }; });
 pub("POST", "/__test/email", ({ body }) => { account(body.accountId).email = { address: body.email, verified: true, source: "code", pending: null }; return { ok: true }; });
 pub("POST", "/__test/approval", ({ body }) => {
@@ -914,7 +931,7 @@ function reset() {
   companies = new Map(); accounts = new Map(); sessions = new Map(); challenges = new Map(); drafts = new Map(); invites = []; outbox = []; txLog = new Map(); idem = new Map(); events = []; streamTokens = new Map(); streamLog = []; idempotentReplays = 0;
   for (const s of streams) s.res.end();
   streams = [];
-  pendingCreates.clear(); pendingKeys.clear(); privyEmailOff = new Set();
+  pendingCreates.clear(); pendingKeys.clear(); privyEmailOff = new Set(); quotesDown = false; quoteTtlMs = 20 * 60_000; usedWithdrawals.clear();
 }
 
 const CORS = { "access-control-allow-methods": "GET,POST,PATCH,DELETE,OPTIONS", "access-control-allow-headers": "content-type, authorization, idempotency-key, last-event-id, x-request-id", "access-control-expose-headers": "idempotent-replay", "access-control-max-age": "600" };
