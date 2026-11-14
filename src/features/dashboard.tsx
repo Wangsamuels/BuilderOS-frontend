@@ -8,6 +8,7 @@ import { Async, Chip, Empty, Icon, NoAccess, PageHeader, Panel, PanelHeader, Seg
 import { useAnalytics, useWorkspace } from "@/data/workspace";
 import { ago } from "@/lib/format";
 import { ratio, usd } from "@/lib/money";
+import { MoneyActions } from "./money";
 
 const RANGES = ["7d", "14d", "30d", "90d"] as const;
 export type Range = (typeof RANGES)[number];
@@ -46,6 +47,7 @@ export function DashboardPage() {
               </Select>
             ) : null}
             <Segmented label="Range" value={range} onChange={(v) => set("range", v === "30d" ? null : v)} options={RANGES.map((r) => ({ value: r, label: r }))} />
+            <MoneyActions />
           </>
         }
       />

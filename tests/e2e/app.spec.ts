@@ -734,6 +734,52 @@ test.describe("money", () => {
     await signIn(page);
     await page.goto("/c/lumen/money");
     await expect(page.getByTestId("budget-row").first()).toBeVisible();
+    await expect(page.getByTestId("deposit")).toBeVisible(); // anyone who can see money can fund it
+    await expect(page.getByTestId("withdraw")).toHaveCount(0);
+  });
+
+  test("deposit and withdraw are one click from the dashboard", async ({ page }) => {
+    await founderOf();
+    await signIn(page);
+    await page.goto("/c/lumen");
+    await page.getByTestId("deposit").click();
+    const dialog = page.getByTestId("deposit-dialog");
+    await expect(dialog.getByRole("img", { name: /QR code/ })).toBeVisible();
+    await expect(dialog).toContainText("Build team address");
+    const build = await page.getByTestId("deposit-dialog-address").textContent();
+    expect(build).toMatch(/^0x[0-9a-f]{40}$/);
+    await expect(dialog).toContainText("Send only USDC on Base Sepolia");
+    // each team has its own address
+    await dialog.getByRole("radio", { name: "Ops" }).click();
+    await expect(dialog).toContainText("Ops team address");
+    await expect(page.getByTestId("deposit-dialog-address")).not.toHaveText(build!);
+    await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+    await dialog.getByRole("button", { name: "Copy address" }).click();
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(await page.getByTestId("deposit-dialog-address").textContent());
+    // a deposit arrives while the dialog is open
+    await seed.deposit("lumen", "ops", 75);
+    await expect(page.getByTestId("deposit-dialog-balance")).toHaveText("$75.00");
+    await page.keyboard.press("Escape");
+
+    // and the same funds can be withdrawn without leaving the dashboard
+    await page.getByTestId("withdraw").click();
+    await page.getByTestId("withdraw-amount").fill("25");
+    await page.getByTestId("withdraw-to").fill("founder.testnet");
+    await page.getByTestId("review-withdrawal").click();
+    await expect(page.getByTestId("withdrawal-plan")).toContainText("$25.00");
+    await page.getByTestId("confirm-withdrawal").click();
+    await signed(page);
+    await page.goto("/c/lumen/money");
+    await expect(page.getByTestId("deposit-balance")).toHaveText("$50.00");
+  });
+
+  test("a builder with no money scope gets neither action", async ({ page }) => {
+    await seed.company("lumen", other(), { name: "Lumen Notes" });
+    await seed.grant("lumen", me.accountId, { scopes: ["builder", "code"] });
+    await signIn(page);
+    await page.goto("/c/lumen");
+    await expect(page.getByTestId("section-work")).toBeVisible();
+    await expect(page.getByTestId("deposit")).toHaveCount(0);
     await expect(page.getByTestId("withdraw")).toHaveCount(0);
   });
 

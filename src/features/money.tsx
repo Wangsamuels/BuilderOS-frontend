@@ -8,7 +8,7 @@ import { endpoints } from "@/api/endpoints";
 import type { Receipt, Team, WithdrawalChain } from "@/api/types";
 import { BudgetBar, seriesColor } from "@/components/charts";
 import { HorizonGauge } from "@/components/singularity";
-import { Async, Button, Chip, CopyButton, Dialog, Dl, Empty, Field, Icon, Input, NoAccess, NotAvailable, Notice, PageHeader, Panel, PanelHeader, Select, Skeleton, SkeletonRows } from "@/components/ui";
+import { Async, Button, Chip, CopyButton, Dialog, Dl, Empty, Field, Icon, Input, NoAccess, NotAvailable, Notice, PageHeader, Panel, PanelHeader, Segmented, Select, Skeleton, SkeletonRows } from "@/components/ui";
 import { useDeposit, useLedger, useTeams, useWorkspace } from "@/data/workspace";
 import { can } from "@/lib/access";
 import { IS_TESTNET } from "@/lib/config";
@@ -180,8 +180,8 @@ function Funding() {
   const q = useDeposit();
   const [qr, setQr] = useState<{ team: string; address: string; chain: string } | null>(null);
   return (
-    <Panel aria-label="Funding">
-      <PanelHeader title="Funding" hint={IS_TESTNET ? "On testnet each team is funded directly with USDC on Base Sepolia." : "Send USDC to the company address; team budgets draw from it."} />
+    <Panel aria-label="Deposit" data-testid="deposit-panel">
+      <PanelHeader title="Deposit" hint={IS_TESTNET ? "On testnet each team is funded directly with USDC on Base Sepolia." : "Send USDC to the company address; team budgets draw from it."} />
       <Async q={q} skeleton={<div className="px-5 pb-5"><SkeletonRows rows={3} /></div>}>
         {(d) => (
           <div className="border-t border-line">
@@ -459,24 +459,81 @@ function Withdraw({ onClose }: { onClose: () => void }) {
   );
 }
 
-function Withdrawals() {
+/* ---------- deposit ---------- */
+/** Where to send USDC: the company's own address where the network has one, otherwise the chosen team's. */
+function Deposit({ onClose }: { onClose: () => void }) {
   const w = useWorkspace();
-  const [open, setOpen] = useState(false);
-  const services = useQuery({ queryKey: ["c", w.slug, "services"], queryFn: () => endpoints.services(w.slug), retry: false, enabled: !w.demo });
-  if (!can.founder(w.access) && !w.demo) return services.error ? <Panel aria-label="Services" className="p-5"><NotAvailable error={services.error} title="Services" /></Panel> : null;
+  const q = useDeposit();
+  const [team, setTeam] = useState<string | null>(null);
   return (
-    <Panel aria-label="Withdraw" className="space-y-3 p-5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="min-w-0">
-          <h2 className="text-[15px] font-semibold">Withdraw</h2>
-          <p className="mt-0.5 max-w-[60ch] text-[13px] text-ink-3">Move USDC out of the company to any address. Only the founder can withdraw, and funds reserved for purchases in progress stay put.</p>
-        </div>
-        <Button action size="sm" icon="external" onClick={() => setOpen(true)} data-testid="withdraw">Withdraw funds</Button>
-      </div>
-      {services.error ? <NotAvailable error={services.error} title="Services" /> : null}
-      {open ? <Withdraw onClose={() => setOpen(false)} /> : null}
-    </Panel>
+    <Dialog open onClose={onClose} title="Deposit USDC" width={420}>
+      <Async q={q} skeleton={<div className="space-y-3 pb-2"><Skeleton className="mx-auto size-[200px]" /><Skeleton className="h-10" /></div>}>
+        {(d) => {
+          const company = d.supported && d.address ? d.address : null;
+          const funded = d.teams.filter((t) => t.address);
+          const pick = funded.find((t) => t.team === team) ?? funded[0];
+          const address = company ?? pick?.address ?? null;
+          const network = company ? "NEAR" : pick ? (CHAINS[pick.chainId] ?? `chain ${pick.chainId}`) : "";
+          return (
+            <div className="flex flex-col items-center gap-4 pb-1 text-center" data-testid="deposit-dialog">
+              {!company && funded.length > 1 ? (
+                funded.length <= 4 ? (
+                  <Segmented label="Team to fund" value={pick!.team} onChange={setTeam} options={funded.map((t) => ({ value: t.team, label: titleCase(t.team) }))} />
+                ) : (
+                  <Select aria-label="Team to fund" value={pick!.team} onChange={(e) => setTeam(e.target.value)}>
+                    {funded.map((t) => <option key={t.team} value={t.team}>{titleCase(t.team)}</option>)}
+                  </Select>
+                )
+              ) : null}
+              {address ? (
+                <>
+                  <Qr value={address} size={200} />
+                  <div className="w-full">
+                    <div className="text-[13px] text-ink-3">{company ? "Company deposit address" : `${titleCase(pick!.team)} team address`}</div>
+                    <code className="num mt-1.5 block rounded-[10px] bg-void/70 px-3 py-2.5 text-[13px] leading-relaxed break-all text-ink select-all" data-testid="deposit-dialog-address">{address}</code>
+                  </div>
+                  <CopyButton value={address} label="Copy address" />
+                  <div className="w-full text-left"><Notice tone="amber">Send only USDC on {network}. Other tokens or networks won't arrive.</Notice></div>
+                  <dl className="flex w-full items-baseline justify-between gap-3 border-t border-line pt-3 text-sm">
+                    <dt className="text-ink-3">{company || !pick ? "Funded so far" : `${titleCase(pick.team)} holds`}</dt>
+                    <dd className="num font-semibold" data-testid="deposit-dialog-balance">{usd(company || !pick ? d.balance : pick.balance)}</dd>
+                  </dl>
+                  <p className="w-full text-left text-[13px] text-ink-3">{company ? "Deposits land in the company treasury on NEAR Intents; team budgets draw from it." : "A deposit shows up here by itself about a minute after it confirms."}</p>
+                </>
+              ) : (
+                <Empty icon="money" title="No deposit address yet" body={can.admin(w.access) ? "Finish payment setup in Settings to give each team an address." : "An admin needs to finish payment setup first."} />
+              )}
+            </div>
+          );
+        }}
+      </Async>
+    </Dialog>
   );
+}
+
+/**
+ * Deposit and Withdraw, as a pair of header actions. The same pair sits on the dashboard and on Money, so moving
+ * funds in or out is one click from wherever the balance is being read. Deposit needs a money scope; withdrawing
+ * is the founder's alone.
+ */
+export function MoneyActions() {
+  const w = useWorkspace();
+  const [open, setOpen] = useState<"deposit" | "withdraw" | null>(null);
+  if (!can.money(w.access)) return null;
+  return (
+    <>
+      <Button action size="sm" icon="plus" onClick={() => setOpen("deposit")} data-testid="deposit">Deposit</Button>
+      {can.founder(w.access) || w.demo ? <Button action size="sm" icon="external" onClick={() => setOpen("withdraw")} data-testid="withdraw">Withdraw</Button> : null}
+      {open === "deposit" ? <Deposit onClose={() => setOpen(null)} /> : null}
+      {open === "withdraw" ? <Withdraw onClose={() => setOpen(null)} /> : null}
+    </>
+  );
+}
+
+function Services() {
+  const w = useWorkspace();
+  const services = useQuery({ queryKey: ["c", w.slug, "services"], queryFn: () => endpoints.services(w.slug), retry: false, enabled: !w.demo });
+  return services.error ? <Panel aria-label="Services" className="p-5"><NotAvailable error={services.error} title="Services" /></Panel> : null;
 }
 
 export function MoneyPage() {
@@ -484,12 +541,12 @@ export function MoneyPage() {
   if (!can.money(w.access)) return (<><PageHeader title="Money" /><Panel as="div"><NoAccess what="budgets and the ledger" /></Panel></>);
   return (
     <>
-      <PageHeader title="Money" sub="Budgets, where to send funds, and every payment agents have made." />
+      <PageHeader title="Money" sub="Budgets, where to send funds, and every payment agents have made." actions={<MoneyActions />} />
       <div className="space-y-4">
         <Budgets />
         <Funding />
         <Ledger />
-        <Withdrawals />
+        <Services />
       </div>
     </>
   );
