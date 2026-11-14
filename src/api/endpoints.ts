@@ -55,6 +55,8 @@ export const endpoints = {
   ledger: (companyId: string, q: { kind?: string; departmentId?: string } = {}) => get<{ receipts: T.Receipt[] }>("/v1/ledger", { companyId, ...q, limit: 100 }),
   ledgerCsv: (companyId: string) => api<string>("/v1/ledger", { query: { companyId, format: "csv" }, raw: true }),
   receipt: (id: string) => get<{ receipt: T.Receipt }>(`/v1/receipts/${id}`),
+  /** Plans a withdrawal (where the money comes from, fees) and returns the transaction that requests it. Founder only. */
+  planWithdrawal: (body: { companyId: string; amount: string; to: string; chain: T.WithdrawalChain; token?: string }, key?: string) => write<T.WithdrawalPlan>("POST", "/v1/withdrawals", body, key),
   withdrawQuote: (companyId: string) => write<unknown>("POST", "/v1/withdraw/quote", { companyId }),
   services: (companyId: string) => get<unknown>("/v1/services", { companyId }),
   freeze: (companyId: string, key?: string, departments?: string[]) => write<T.WithTx>("POST", "/v1/freeze", { companyId, departments }, key),

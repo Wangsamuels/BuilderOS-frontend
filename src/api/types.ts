@@ -191,3 +191,8 @@ export type DemoBundle = {
 };
 
 export type StreamEvent = { id: number; event: string; companyId: string | null; departmentId: string | null; data: Record<string, unknown>; at: string };
+
+export type WithdrawalChain = "near" | "base" | "ethereum" | "arbitrum" | "solana";
+export type WithdrawalPlan = {
+  plan: { withdrawalId: string; amount: Micro; token: string; to: string; chain: WithdrawalChain; sources: Array<{ from: "intents" | "tempo" | string; amount: Micro; estFee?: Micro }>; available: { intents: Micro; tempoUnreserved: Micro } };
+} & WithTx;

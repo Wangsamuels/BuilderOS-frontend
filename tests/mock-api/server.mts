@@ -461,6 +461,14 @@ function applyTx(accountId: string, t: Json): string {
       c.members.set(accountId, { scopes: scopes.filter((s) => s !== "admin"), admin: scopes.includes("admin"), departmentId: inv!.template !== "admin" && inv!.departments.length === 1 ? dept(inv!.departments[0], c.slug) : null });
       emit("grant_set", c, { account: accountId });
     } else if (methodName === "revoke") { founderOnly(c); c.members.delete(args.account); c.viewKeys.delete(args.account); emit("grant_revoked", c, { account: args.account }); }
+    else if (methodName === "request_withdrawal") {
+      founderOnly(c);
+      let left = BigInt(args.amount);
+      for (const team of c.teams) { const take = team.funded < left ? team.funded : left; team.funded -= take; left -= take; }
+      if (left > 0n) fail("Smart contract panicked: not enough funds to withdraw");
+      c.receipts.unshift({ id: nid("rcpt"), kind: "withdrawal", companyId: c.id, departmentId: null, actor: accountId, amount: args.amount, token: "USDC", rail: args.chain, chainId: null, foreignTx: null, verifiedOnChain: true, requestId: args.withdrawal_id, payload: { seller: `Withdrawal to ${args.to}`, to: args.to }, nearTx: hash, createdAt: iso(now()) });
+      emit("withdrawal_requested", c, { company_id: c.id, withdrawal_id: args.withdrawal_id, amount: args.amount, token: "usdc", to: args.to });
+    }
     else if (methodName === "register_view_key") { if (!access(c, accountId)) fail("Smart contract panicked: not a member"); }
     else if (methodName === "rotate_code_key") { founderOnly(c); c.codeKeyVersion = args.version; }
     else if (methodName === "register_agent") { adminOnly(c); const team = c.teams.find((k) => k.departmentId === args.department); if (team && !team.agents.some((g) => g.publicKey === args.public_key)) team.agents.push({ publicKey: args.public_key, role: args.role, status: "running" }); emit("agent_registered", c, {}, team?.departmentId ?? null); }
@@ -697,6 +705,15 @@ on("GET", "/v1/ledger", ({ me, q, raw }) => {
 on("GET", "/v1/receipts/:id", ({ me, p }) => {
   for (const c of myCompanies(me.id)) { const r = c.receipts.find((x) => x.id === p.id); if (r) { authorize(me.id, c.id, ["view", "approve"]); return { receipt: r }; } }
   throw new Http(404, "not_found", "That receipt doesn't exist.");
+});
+on("POST", "/v1/withdrawals", ({ me, body }) => {
+  const { c } = authorize(me.id, body.companyId, "founder");
+  if (!/^\d+$/.test(body.amount ?? "") || !body.to || !["near", "base", "ethereum", "arbitrum", "solana"].includes(body.chain ?? "near")) throw new Http(400, "invalid_request", "amount, to and chain are required.");
+  const available = c.teams.reduce((n, t) => n + t.funded, 0n); // stands in for the company treasury
+  const want = BigInt(body.amount);
+  if (want > available) throw new Http(409, "insufficient_funds", `only ${available} available (reserved funds are excluded)`);
+  const withdrawalId = nid("wd");
+  return { plan: { withdrawalId, amount: body.amount, token: "usdc", to: body.to, chain: body.chain ?? "near", sources: [{ from: "intents", amount: body.amount }], available: { intents: available.toString(), tempoUnreserved: "0" } }, transaction: tx(c.id, "request_withdrawal", { withdrawal_id: withdrawalId, amount: body.amount, to: body.to, chain: body.chain ?? "near" }, "1", me.id) };
 });
 on("POST", "/v1/withdraw/quote", notImplemented("withdraw.quote", "unsupported", "Withdrawal quotes aren't a separate step.", "POST /v1/withdrawals (the plan is the quote)"));
 on("GET", "/v1/services", notImplemented("services", "planned", "Recurring services aren't available yet."));

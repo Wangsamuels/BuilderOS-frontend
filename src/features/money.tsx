@@ -3,8 +3,9 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import qrcode from "qrcode-generator";
 import { useMemo, useState } from "react";
+import { isApiError } from "@/api/client";
 import { endpoints } from "@/api/endpoints";
-import type { Receipt, Team } from "@/api/types";
+import type { Receipt, Team, WithdrawalChain } from "@/api/types";
 import { BudgetBar, seriesColor } from "@/components/charts";
 import { HorizonGauge } from "@/components/singularity";
 import { Async, Button, Chip, CopyButton, Dialog, Dl, Empty, Field, Icon, Input, NoAccess, NotAvailable, Notice, PageHeader, Panel, PanelHeader, Select, Skeleton, SkeletonRows } from "@/components/ui";
@@ -343,23 +344,137 @@ function Ledger() {
   );
 }
 
-/* ---------- not available yet (stable 501 answers) ---------- */
-function Unavailable() {
+/* ---------- withdraw ---------- */
+const CHAIN_OPTIONS: Array<{ id: WithdrawalChain; label: string; hint: string; valid: (a: string) => boolean }> = [
+  { id: "near", label: "NEAR", hint: "A NEAR account, like you.near, or a 64-character address", valid: (a) => /^(([a-z\d]+[-_])*[a-z\d]+\.)*([a-z\d]+[-_])*[a-z\d]+$/.test(a) && a.length >= 2 && a.length <= 64 },
+  { id: "base", label: "Base", hint: "An address starting with 0x", valid: (a) => /^0x[0-9a-fA-F]{40}$/.test(a) },
+  { id: "ethereum", label: "Ethereum", hint: "An address starting with 0x", valid: (a) => /^0x[0-9a-fA-F]{40}$/.test(a) },
+  { id: "arbitrum", label: "Arbitrum", hint: "An address starting with 0x", valid: (a) => /^0x[0-9a-fA-F]{40}$/.test(a) },
+  { id: "solana", label: "Solana", hint: "A Solana address", valid: (a) => /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(a) },
+];
+const SOURCE: Record<string, string> = { intents: "Company treasury", tempo: "Unreserved team floats" };
+
+/**
+ * Withdraw in two beats, like every other money decision here: first the plan (where the funds come from and
+ * what it costs), then the founder's wallet signs the request. Nothing moves before the signature.
+ */
+function Withdraw({ onClose }: { onClose: () => void }) {
   const w = useWorkspace();
-  const services = useQuery({ queryKey: ["c", w.slug, "services"], queryFn: () => endpoints.services(w.slug), retry: false, enabled: !w.demo });
-  const quote = useMutation({ mutationFn: () => endpoints.withdrawQuote(w.slug) });
-  if (w.demo) return null;
+  const { run, pending } = useWrite();
+  const [amount, setAmount] = useState("");
+  const [chain, setChain] = useState<WithdrawalChain>("near");
+  const [to, setTo] = useState("");
+  const micro = parseUsd(amount);
+  const net = CHAIN_OPTIONS.find((c) => c.id === chain)!;
+  const address = to.trim();
+  const addressOk = net.valid(address);
+  const plan = useMutation({ mutationFn: () => endpoints.planWithdrawal({ companyId: w.slug, amount: micro!, to: address, chain }) });
+  const p = plan.data?.plan;
+  const short = isApiError(plan.error, "insufficient_funds");
+  // the server words the shortfall in raw units ("only 0 available"); say it in dollars
+  const have = short ? /only (\d+) available/.exec((plan.error as Error).message)?.[1] : undefined;
+  const fee = sum((p?.sources ?? []).map((x) => x.estFee ?? "0"));
+
+  const sign = async () => {
+    if (!plan.data || !p) return;
+    const ok = await run({
+      title: "Withdraw funds",
+      summary: (
+        <>
+          <span className="num text-ink">{usd(p.amount)}</span> leaves the company for <span className="num text-ink">{shortAccount(p.to)}</span> on {net.label}.
+        </>
+      ),
+      // the plan already carries the transaction for this exact withdrawal; sign that one
+      request: () => Promise.resolve(plan.data),
+      areas: ["deposit", "ledger", "teams", "analytics"],
+      done: "Withdrawal requested",
+    });
+    if (ok) onClose();
+  };
+
   return (
-    <Panel aria-label="More money features" className="space-y-3 p-5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-[15px] font-semibold">Withdrawals and services</h2>
-          <p className="mt-0.5 text-[13px] text-ink-3">Moving funds out and managing recurring services.</p>
+    <Dialog
+      open
+      onClose={onClose}
+      title={p ? "Review the withdrawal" : "Withdraw funds"}
+      footer={
+        p ? (
+          <>
+            <Button variant="ghost" onClick={() => plan.reset()}>Back</Button>
+            <Button action variant="primary" loading={Boolean(pending)} onClick={() => void sign()} data-testid="confirm-withdrawal">Withdraw {usd(p.amount)}</Button>
+          </>
+        ) : (
+          <>
+            <Button variant="ghost" onClick={onClose}>Cancel</Button>
+            <Button action variant="primary" disabled={!micro || toBig(micro) === 0n || !addressOk} loading={plan.isPending} onClick={() => plan.mutate()} data-testid="review-withdrawal">Review withdrawal</Button>
+          </>
+        )
+      }
+    >
+      {p ? (
+        <div data-testid="withdrawal-plan">
+          <div className="num text-3xl font-semibold">{usd(p.amount)}</div>
+          <p className="mt-1 mb-3 text-sm text-ink-3">USDC, sent on {net.label}</p>
+          <Dl
+            rows={[
+              ["To", <span key="t" className="num break-all">{p.to}</span>],
+              ...p.sources.map((x) => [`From ${(SOURCE[x.from] ?? x.from).toLowerCase()}`, <span key={x.from} className="num">{usd(x.amount)}</span>] as [string, React.ReactNode]),
+              ["Estimated fee", <span key="f" className="num">{toBig(fee) > 0n ? usd(fee) : "None"}</span>],
+            ]}
+          />
+          <div className="mt-4"><Notice tone="amber">Check the address and network. A withdrawal can't be reversed once your wallet has signed it.</Notice></div>
         </div>
-        {can.founder(w.access) ? <Button size="sm" loading={quote.isPending} onClick={() => quote.mutate()} data-testid="withdraw-quote">Get a withdrawal quote</Button> : null}
+      ) : (
+        <form className="space-y-4" onSubmit={(e) => (e.preventDefault(), micro && addressOk && plan.mutate())}>
+          <Field label="Amount (USDC)" error={amount && micro === null ? "Enter an amount like 25 or 25.50." : null}>
+            {(f) => <Input {...f} inputMode="decimal" autoFocus value={amount} onChange={(e) => (setAmount(e.target.value), plan.reset())} placeholder="0.00" className="num" data-testid="withdraw-amount" />}
+          </Field>
+          <Field label="Send on">
+            {(f) => (
+              <Select {...f} value={chain} onChange={(e) => (setChain(e.target.value as WithdrawalChain), plan.reset())} data-testid="withdraw-chain">
+                {CHAIN_OPTIONS.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+              </Select>
+            )}
+          </Field>
+          <Field label="Destination address" hint={net.hint} error={address && !addressOk ? `This doesn't look like a ${net.label} address.` : null}>
+            {(f) => <Input {...f} value={to} onChange={(e) => (setTo(e.target.value), plan.reset())} autoComplete="off" spellCheck={false} className="num" data-testid="withdraw-to" />}
+          </Field>
+          {short ? (
+            <div data-testid="withdraw-short">
+              <Notice tone="amber">
+                <strong className="font-semibold">There isn't that much to withdraw.</strong>
+                <span className="mt-1 block text-ink-2">
+                  {have !== undefined ? <>Withdrawable now: <span className="num text-ink">{usd(have)}</span>. </> : null}
+                  Funds reserved for purchases in progress are left out.
+                  {IS_TESTNET ? " On testnet the company treasury isn't available, so team funds stay at each team's Base Sepolia address and can't be withdrawn from here." : ""}
+                </span>
+              </Notice>
+            </div>
+          ) : plan.error ? (
+            <WriteError error={plan.error} feature="Withdrawals" />
+          ) : null}
+        </form>
+      )}
+    </Dialog>
+  );
+}
+
+function Withdrawals() {
+  const w = useWorkspace();
+  const [open, setOpen] = useState(false);
+  const services = useQuery({ queryKey: ["c", w.slug, "services"], queryFn: () => endpoints.services(w.slug), retry: false, enabled: !w.demo });
+  if (!can.founder(w.access) && !w.demo) return services.error ? <Panel aria-label="Services" className="p-5"><NotAvailable error={services.error} title="Services" /></Panel> : null;
+  return (
+    <Panel aria-label="Withdraw" className="space-y-3 p-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="text-[15px] font-semibold">Withdraw</h2>
+          <p className="mt-0.5 max-w-[60ch] text-[13px] text-ink-3">Move USDC out of the company to any address. Only the founder can withdraw, and funds reserved for purchases in progress stay put.</p>
+        </div>
+        <Button action size="sm" icon="external" onClick={() => setOpen(true)} data-testid="withdraw">Withdraw funds</Button>
       </div>
-      {quote.error ? <NotAvailable error={quote.error} title="Withdrawal quote" /> : null}
       {services.error ? <NotAvailable error={services.error} title="Services" /> : null}
+      {open ? <Withdraw onClose={() => setOpen(false)} /> : null}
     </Panel>
   );
 }
@@ -374,7 +489,7 @@ export function MoneyPage() {
         <Budgets />
         <Funding />
         <Ledger />
-        <Unavailable />
+        <Withdrawals />
       </div>
     </>
   );

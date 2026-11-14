@@ -20,6 +20,8 @@ const AREAS: Record<string, string[]> = {
   frozen: ["company", "teams", "analytics"],
   unfrozen: ["company", "teams", "analytics"],
   deposit_received: ["deposit", "teams"],
+  withdrawal_requested: ["deposit", "ledger"],
+  withdrawal_recorded: ["deposit", "ledger", "teams"],
   grant_set: ["members", "company"],
   grant_revoked: ["members", "company"],
   company_created: ["company", "teams"],

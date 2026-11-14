@@ -691,9 +691,50 @@ test.describe("money", () => {
     // stable 501 answers render as honest "not available yet" states
     await expect(page.getByText(/Services: not available yet/)).toBeVisible();
     await expect(page.getByText("Planned")).toBeVisible();
-    await page.getByTestId("withdraw-quote").click();
-    await expect(page.getByText(/Withdrawal quote: not available yet/)).toBeVisible();
-    await expect(page.getByText(/Use instead: POST \/v1\/withdrawals/)).toBeVisible();
+  });
+
+  test("the founder withdraws: plan first, then the wallet signs; a shortfall is explained", async ({ page }) => {
+    await founderOf();
+    await signIn(page);
+    await page.goto("/c/lumen/money");
+    await page.getByTestId("withdraw").click();
+
+    // the form checks the address against the chosen network before anything is sent
+    await page.getByTestId("withdraw-amount").fill("40");
+    await page.getByTestId("withdraw-chain").selectOption("base");
+    await page.getByTestId("withdraw-to").fill("alice.testnet");
+    await expect(page.getByText("This doesn't look like a Base address.")).toBeVisible();
+    await expect(page.getByTestId("review-withdrawal")).toBeDisabled();
+    await page.getByTestId("withdraw-to").fill("0x7b1E4c0f2A9d53e8C6B4a1F09d2E7c5B8a3F6D10");
+
+    // nothing withdrawable yet (the testnet situation): said plainly, in dollars
+    await page.getByTestId("review-withdrawal").click();
+    await expect(page.getByTestId("withdraw-short")).toContainText("There isn't that much to withdraw");
+    await expect(page.getByTestId("withdraw-short")).toContainText("$0.00");
+
+    // funds arrive; the same request now returns a plan to review
+    await seed.deposit("lumen", "build", 100);
+    await page.getByTestId("review-withdrawal").click();
+    const plan = page.getByTestId("withdrawal-plan");
+    await expect(plan).toContainText("$40.00");
+    await expect(plan).toContainText("0x7b1E4c0f2A9d53e8C6B4a1F09d2E7c5B8a3F6D10");
+    await expect(plan).toContainText("From company treasury");
+    await expect(plan).toContainText("can't be reversed");
+    await page.getByTestId("confirm-withdrawal").click();
+    await signed(page);
+
+    await expect(page.getByTestId("deposit-balance")).toHaveText("$60.00");
+    await expect(page.getByTestId("ledger-row").first()).toContainText("Withdrawal");
+    await expect(page.getByTestId("ledger-row").first()).toContainText("$40.00");
+  });
+
+  test("only the founder sees Withdraw", async ({ page }) => {
+    await seed.company("lumen", other(), { name: "Lumen Notes" });
+    await seed.grant("lumen", me.accountId, { admin: true });
+    await signIn(page);
+    await page.goto("/c/lumen/money");
+    await expect(page.getByTestId("budget-row").first()).toBeVisible();
+    await expect(page.getByTestId("withdraw")).toHaveCount(0);
   });
 
   test("a v2 company explains the contract upgrade instead of hiding the feature", async ({ page }) => {
